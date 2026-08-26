@@ -1,0 +1,16 @@
+{
+  "rule_id": "금리특약_신용체크카드_결제실적",
+  "target_event": "신용체크카드 결제 실적",
+  "condition": "전전월부터 전월 중 결제실적 100만원 이상",
+  "effect": "연 0.20% 우대",
+  "nested_or_conditions": [],
+  "tiers": [],
+  "window": "전전월부터 전월 중",
+  "effect_value": "연 0.20%",
+  "exception": "",
+  "attribution_rule": "",
+  "grace_period": "",
+  "recalc_frequency": "",
+  "cap_or_rate_floor": "",
+  "reversible_or_retroactive_restore": ""
+}

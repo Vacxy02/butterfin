@@ -1,0 +1,20 @@
+{
+  "rule_id": "우대금리",
+  "target_event": "우대금리 적용",
+  "condition": "급여이체, 내부등급, 부산지역 공무원 조건 충족",
+  "effect": "금리 감면",
+  "nested_or_conditions": [
+    "급여이체 0.20%",
+    "내부등급에 따라 최대 0.20%",
+    "부산지역 공무원 특별감면금리 0.40%"
+  ],
+  "tiers": [],
+  "window": "",
+  "effect_value": "",
+  "exception": "비대면 적용불가, 특별우대금리 운영 한도 소진 시 적용 중단",
+  "attribution_rule": "",
+  "grace_period": "",
+  "recalc_frequency": "",
+  "cap_or_rate_floor": "최대 0.20%",
+  "reversible_or_retroactive_restore": ""
+}

@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: action-reversal
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: starter   # 반드시 starter (free 아님 — 무접속 sleep 있는 플랜은 심사에서 흰 화면 위험)
+    region: singapore
+    healthCheckPath: /api/health
+    envVars:
+      - key: AR_MODE
+        value: DEMO
+      - key: GEMINI_API_KEY
+        sync: false   # 대시보드에서 직접 입력 (여기 값 넣지 않음)
+      - key: GEMINI_MODEL
+        value: gemini-3.6-flash   # ai_rule.py(팀 실제 코드) 기본값과 맞춤 — 배포 전 계정에서 되는 모델명인지 확인

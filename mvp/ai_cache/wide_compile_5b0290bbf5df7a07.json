@@ -1,0 +1,19 @@
+{
+  "rule_id": "우대금리",
+  "target_event": "우대금리 적용 조건 충족",
+  "condition": "급여이체, 주거래고객, 5년이상 근무자, 전자금융 가입, 자동이체 등록된 월10만원이상 적립식예금 또는 매월 납입하는 주택청약총합저축 가입 및 유지",
+  "effect": "우대금리 적용",
+  "nested_or_conditions": [
+    "자동이체 등록된 월10만원이상 적립식예금 가입 및 유지",
+    "매월 납입하는 주택청약총합저축 가입 및 유지"
+  ],
+  "tiers": [],
+  "window": "",
+  "effect_value": "급여이체0.5% / 주거래고객0.2% / 5년이상 근무자0.2% / 전자금융 가입0.1% / 적립식예금 또는 주택청약종합저축0.2%",
+  "exception": "",
+  "attribution_rule": "",
+  "grace_period": "",
+  "recalc_frequency": "",
+  "cap_or_rate_floor": "최대 연1.0%",
+  "reversible_or_retroactive_restore": ""
+}

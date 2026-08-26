@@ -1,0 +1,202 @@
+[
+  {
+    "sample_id": "U001",
+    "institution": "부산은행",
+    "product": "공무원가계자금 인터넷대출",
+    "source_type": "official web",
+    "source_bundle_text": "우대금리\n가. 거래실적옵션 감면금리\n- 급여이체 0.20%\n나. 내부등급에 따라 최대 0.20%\n다. 부산지역 공무원 특별감면금리 0.40%(비대면 적용불가, 특별우대금리 운영 한도 소진 시 적용 중단)",
+    "source_url": "https://www.busanbank.co.kr/ib20/mnu/FPMLON092001003?ib20_redirect_org_mnu=CMNLIN0010002"
+  },
+  {
+    "sample_id": "U002",
+    "institution": "우리은행",
+    "product": "한국전력공사 PPL (Prime Power Loan)",
+    "source_type": "official web",
+    "source_bundle_text": "우대금리\n- 최대 연1.0%\n- 급여이체0.5% / 주거래고객0.2% / 5년이상 근무자0.2% / 전자금융 가입0.1%\n- 자동이체 등록된 월10만원이상 적립식예금 또는 매월 납입하는 주택청약총합저축 가입 및 유지고객0.2%",
+    "source_url": "https://spib.wooribank.com/pib/Dream?withyou=PSLON0135"
+  },
+  {
+    "sample_id": "U003",
+    "institution": "SC제일은행",
+    "product": "급여이체 금리우대 특약",
+    "source_type": "official PDF",
+    "source_bundle_text": "급여이체 금리우대 특약\n가. 급여이체 확인일에 급여이체 인정기간 동안 급여이체가 1회 이상 발생한 것으로 확인된 경우에 한하여 금리우대 제공기간 동안 우대금리를 적용합니다.\n- 최초 대출 신규 시에는 대출 신규월 포함 3개월의 말일까지는 급여이체 실적 충족 여부와 관계 없이 우대금리를 우선 적용합니다. 다만, 우선 적용기간 이후 우대조건에 미달된 경우에는 우선 적용 우대금리가 끝나는 다음 월 1일부터 우대금리 적용을 중단하기로 합니다.\n나. 급여이체 금리우대 신청 시 대출신규일부터 위 ‘가’ 항의 규정에 의한 우대금리를 적용합니다.\n다. 급여이체 인정 기간\n- 급여이체 확인일의 전월 1일 ~ 말일\n라. 금리우대 제공 기간\n- 급여이체 확인일의 다음 월 1일 ~ 말일\n※ 급여이체: 다음 중 하나 이상의 조건을 충족하는 경우 급여이체로 인정함.\n- 펌뱅킹, 센터처리 등에 의한 대량 급여이체\n- 급여이체로 지정한 계좌에 급여 관련 문구(급여, 월급, 봉급, 상여금, 보너스 포함)로 70만원 이상 입금(동일인 계좌간 이체 제외)\n- 급여 이체일을 지정하고 지정일 전후 1영업일에 70만원 이상 입금(동일인 계좌간 이체 제외)\n※ 급여이체 확인일: 급여이체 인정기간에 급여이체가 있었는지 확인하는 날\n- 매월 말일 이전 3영업일",
+    "source_url": "https://www.standardchartered.co.kr/hp/cms/hp/pdf/loan337_220121_F.pdf"
+  },
+  {
+    "sample_id": "U004",
+    "institution": "IBK기업은행",
+    "product": "IBK전세대출(HF) 가계대출 금리특약",
+    "source_type": "official web",
+    "source_bundle_text": "가계대출 금리특약 세부내용\n- 신용(체크)카드 결제실적(최대 연 0.3%p), 급여(연금)이체(최대 연 0.2%p), 적립식 예금(주택청약종합저축 포함)(최대 연 0.2%p), 입출식예금(최대 연 0.3%p) 실적에 따라 항목별 우대율 차등 적용\n- 금리특약 항목을 이행하는 조건으로 약정일로부터 3개월 간 해당 금리를 감면 받고, 이후 1개월 단위로 금리우대 조건 이행여부를 체크하여 항목별 우대율로 자동금리 감면. 단, 매월 조건이 이행되지 않을 경우 감면 금리를 적용하지 아니하며, 추후 조건이 이행되는 경우 금리를 자동으로 우대\n- 기간별 실적 충족 검증은 월중 또는 기간합산 실적을 활용함. 이자납입예정일이 1일~10일인 경우 전전월 중 또는 전전월말기준 최근 3개월간 실적을 기준으로 하며, 이자납입예정일이 11일~말일인 경우 전월 중 또는 전월말 기준 최근 3개월간 실적을 기준으로 함",
+    "source_url": "https://mybank.ibk.co.kr/uib/jsp/guest/ntr/ntr70/ntr7015/PNTR701500_i2.jsp?MENU_DIV=GNB&grcd=21&lncd=02&pdcd=0007&tmcd=202"
+  },
+  {
+    "sample_id": "U005",
+    "institution": "IBK기업은행",
+    "product": "군인생활안정자금대출 - 카드실적",
+    "source_type": "official web",
+    "source_bundle_text": "금리특약 우대조건\n- 신용체크카드 결제 실적(전전월부터 전월 중 결제실적 100만원 이상) : 연 0.20%",
+    "source_url": "https://mybank.ibk.co.kr/uib/jsp/guest/ntr/ntr70/ntr7015/PNTR701500_i2.jsp?MENU_DIV=GNB&grcd=21&lncd=02&pdcd=0099&tmcd=201"
+  },
+  {
+    "sample_id": "U006",
+    "institution": "IBK기업은행",
+    "product": "군인생활안정자금대출 - 급여/연금",
+    "source_type": "official web",
+    "source_bundle_text": "금리특약 우대조건\n- 급여(연금)이체(전전월부터 전월 중 급여 100만원 이상 또는 6대연금 60만원 이상 입금) : 연 0.20%",
+    "source_url": "https://mybank.ibk.co.kr/uib/jsp/guest/ntr/ntr70/ntr7015/PNTR701500_i2.jsp?MENU_DIV=GNB&grcd=21&lncd=02&pdcd=0099&tmcd=201"
+  },
+  {
+    "sample_id": "U007",
+    "institution": "IBK기업은행",
+    "product": "군인생활안정자금대출 - 자동이체",
+    "source_type": "official web",
+    "source_bundle_text": "금리특약 우대조건\n- 제세공과금 등 자동이체(전전월부터 전월 중 자동이체 3건 이상) : 0.1%",
+    "source_url": "https://mybank.ibk.co.kr/uib/jsp/guest/ntr/ntr70/ntr7015/PNTR701500_i2.jsp?MENU_DIV=GNB&grcd=21&lncd=02&pdcd=0099&tmcd=201"
+  },
+  {
+    "sample_id": "U008",
+    "institution": "IBK기업은행",
+    "product": "군인생활안정자금대출 - 주택청약",
+    "source_type": "official web",
+    "source_bundle_text": "금리특약 우대조건\n- 주택청약종합저축(전전월부터 전월 중 입금실적 1회 이상) : 연 0.10%",
+    "source_url": "https://mybank.ibk.co.kr/uib/jsp/guest/ntr/ntr70/ntr7015/PNTR701500_i2.jsp?MENU_DIV=GNB&grcd=21&lncd=02&pdcd=0099&tmcd=201"
+  },
+  {
+    "sample_id": "U009",
+    "institution": "IBK기업은행",
+    "product": "군인생활안정자금대출 - ISA",
+    "source_type": "official web",
+    "source_bundle_text": "금리특약 우대조건\n- 개인종합자산관리계좌(ISA)(전월말 기준 1좌 이상 보유) : 연 0.10%",
+    "source_url": "https://mybank.ibk.co.kr/uib/jsp/guest/ntr/ntr70/ntr7015/PNTR701500_i2.jsp?MENU_DIV=GNB&grcd=21&lncd=02&pdcd=0099&tmcd=201"
+  },
+  {
+    "sample_id": "U010",
+    "institution": "하나은행",
+    "product": "달달 하나 적금 - 급여이체",
+    "source_type": "official web",
+    "source_bundle_text": "급여이체 우대 (연 0.50%)\n이 예금 가입 후 만기 전전월말 기준, 가입일로부터 본인명의 하나은행 입출금 통장을 통해, 6회 이상 급여 입금 실적 보유한 경우 (월1회 인정)",
+    "source_url": "https://banking.hanabank.com/cont/mall/mall08/mall0801/mall080102/1503152_115157.jsp"
+  },
+  {
+    "sample_id": "U011",
+    "institution": "하나은행",
+    "product": "달달 하나 적금 - 하나카드 결제",
+    "source_type": "official web",
+    "source_bundle_text": "하나카드 결제 (연 0.50%)\n이 예금 가입 후 만기 전전월말 기준, 가입일로부터 본인명의 하나은행 입출금 통장을 통해, 6회 이상 하나카드 결제 실적을 보유한 경우 (월1회 인정, 하나머니 충전방식 제외)",
+    "source_url": "https://banking.hanabank.com/cont/mall/mall08/mall0801/mall080102/1503152_115157.jsp"
+  },
+  {
+    "sample_id": "U012",
+    "institution": "부산은행",
+    "product": "주거래고객 우대서비스",
+    "source_type": "official web",
+    "source_bundle_text": "주거래고객 기준\n필수조건: 핵심예금 평잔 30만원 이상 또는 대출한도 보유\n선택조건: 아래 12가지 항목 중 5가지 이상 충족\n자동이체, 거래기간, 디지털금융(인터넷뱅킹, 모바일뱅킹, 썸뱅킹), 오픈뱅킹, 적립식수신(잔액 10만원 이상), 거치식수신, 수익증권, 방카, 신탁, 퇴직연금, 신용카드, 노란우산공제\n주거래고객선정 및 적용\n주거래고객 등급은 매월 말일을 기준으로 익월 10일 선정하여 3개월간 적용",
+    "source_url": "https://www.busanbank.co.kr/ib20/mnu/FPMDPO014002001"
+  },
+  {
+    "sample_id": "U013",
+    "institution": "KB국민은행",
+    "product": "KB 매직카대출(신차) - 적립식예금",
+    "source_type": "official web",
+    "source_bundle_text": "③ 우대금리 : 최고 연 1.2%p 우대\n☞실적 연동 우대 : 최고 연 0.8%p\n- 급여(연금)이체 실적우대 : 최고 연 0.3%p\n- KB국민카드(신용) 이용실적 우대 : 연 0.1%p~연 0.3%p\n(결제계좌를 당행으로 지정하고 최근 3개월간 30/60/90 만원 이상 이용실적이 있는 경우)\n- 적립식예금 30만원 이상 계좌 보유 우대 : 연 0.2%P",
+    "source_url": "https://obank.kbstar.com/quics?QSL=F&page=C103585"
+  },
+  {
+    "sample_id": "U014",
+    "institution": "KB국민은행",
+    "product": "KB 매직카대출(신차) - 재산정",
+    "source_type": "official web",
+    "source_bundle_text": "※ 실적연동 우대금리는 각 항목의 우대조건의 충족여부에 따라 대출신규 3개월 이후 매월 재산정되어 적용됩니다.",
+    "source_url": "https://obank.kbstar.com/quics?QSL=F&page=C103585"
+  },
+  {
+    "sample_id": "U015",
+    "institution": "우리은행",
+    "product": "우리가족 우대서비스 - 등급/적용기간",
+    "source_type": "official web",
+    "source_bundle_text": "등급명칭 및 기준\n등급명 | Prestige | Honor | Royal | Family\n점수구간 | 7,000점 이상 | 4,000점 이상 | 2,000점 이상 | 1,200점 이상\n\n등급 산정 시기 및 우대서비스 적용기간\n실적기준월 | 1월~3월 | 4월~6월 | 7월~9월 | 10월~12월\n등급적용일 | 5월1일 | 8월1일 | 11월1일 | 다음해 2월1일\n서비스 기간 | 5월1일~7월31일 | 8월1일~10월31일 | 11월1일~1월31일 | 2월1일~4월30일\n선정된 등급에 따른 우대서비스를 3개월간 제공합니다.",
+    "source_url": "https://spot.wooribank.com/pot/Dream?withyou=CQFNS0048"
+  },
+  {
+    "sample_id": "U016",
+    "institution": "우리은행",
+    "product": "우리가족 우대서비스 - 주거래고객",
+    "source_type": "official web",
+    "source_bundle_text": "주거래고객\n- 등급적용일 전월기준 과거 1년간 급여이체 또는 우리카드(신용) 결제실적을 유지하신 고객님\n- Family 등급의 수수료 면제혜택을 제공해드립니다\n- 매월 1일부터 말일사이 월 50만원 이상 급여이체 또는 신용카드 결제대금이 정상 청구 및 정상결제 되는 경우에 한합니다(선결제 제외)",
+    "source_url": "https://spot.wooribank.com/pot/Dream?withyou=CQFNS0048"
+  },
+  {
+    "sample_id": "U017",
+    "institution": "IBK기업은행",
+    "product": "i-ONE동반성장협력신용대출 - 카드매출 자동상환",
+    "source_type": "official web",
+    "source_bundle_text": "금리감면\n- 금리우대 : 자동감면 연 0.78%p\n- 자동상환방식 선택 시 자동상환 비율에 따라 아래와 같이 금리 추가 자동감면\n구분 / 자동상환 비율\n10%이상~50%미만 | 50%이상~100%미만 | 100%\n카드매출대금 자동상환: 연 0.2%p | 연 0.3%p | 연 0.5%p\n매일원금 자동상환: 연 0.5%p\n\n카드매출대금 자동상환\n- BC카드가맹점 결제계좌가 IBK기업은행인 경우에 한해 선택가능\n- 상환비율 10~100% 범위로 10% 단위 선택 가능",
+    "source_url": "https://mybank.ibk.co.kr/uib/jsp/guest/ntr/ntr70/ntr7015/PNTR701500_i2.jsp?grcd=11&i_trns_biz_kncd=i-ONE%EB%8F%99%EB%B0%98%EC%84%B1%EC%9E%A5%ED%98%91%EB%A0%A5%EC%8B%A0%EC%9A%A9%EB%8C%80%EC%B6%9C(%EC%A4%91%EC%86%8C%EA%B8%B0%EC%97%85%EC%A4%91%EC%95%99%ED%9A%8CII)&lncd=02&pdcd=0628&tmcd=201"
+  },
+  {
+    "sample_id": "U018",
+    "institution": "iM뱅크",
+    "product": "For-You 자유적립 외화예금 - 중도해지 예외",
+    "source_type": "official PDF",
+    "source_bundle_text": "중도해지금리\n- 신규 가입일 당시 당해 영업점 및 인터넷 홈페이지에 고시한 예치기간별 중도해지금리 적용\n경과기간 / 이율\n7일 미만 / 무이자\n7일 이상 ~ 15일 미만 / 기본금리의 1/10\n15일 이상 ~ 1개월 미만 / 기본금리의 2/10\n1개월 이상 ~ 3개월 미만 / 기본금리의 3/10\n3개월 이상 ~ 6개월 미만 / 기본금리의 4/10\n6개월 이상 ~ 12개월 미만 / 기본금리의 5/10\n※ 단, 예치기간이 7일 이상인 중도해지건 중 상속(사망)으로 인한 중도해지시 당초 약정금리를 지급합니다.",
+    "source_url": "https://www.imbank.co.kr/upload/newbbs/FNM001/20251103134813636941054.pdf"
+  },
+  {
+    "sample_id": "U019",
+    "institution": "IBK기업은행",
+    "product": "머니박스 - 실적연동 우대",
+    "source_type": "official web",
+    "source_bundle_text": "연 1.0%p\n직전월(1일~말일까지) 연결계좌인 『IBK개인입출통장』의 실적이 아래 조건 중 1가지 이상을 충족하는 경우 당월(1일~말일까지)에 우대금리 제공\n1. 급여이체(월 50만원 이상) 실적을 보유한 경우\n급여이체 실적 인정기준 (다음 방식 중 1가지 이상 충족 시)\n① 시스템 급여이체 방식 : IBK 영업점 창구 급여이체 또는 인터넷뱅킹급여이체 시스템을 통해 월 50만원 이상 입금\n② 기타 이체 방식 : 지로대량이체, CMS대량이체, 타행환, 전자금융을 통해 급여, 월급, 상여금 등의 용어로 월 50만원 이상 입금\n(단, IBK영업점 창구, 자동화기기 입금, 당행간 자동이체 등은 인정되지 않음)\n③ 급여이체 지정일자 등록방식 : 급여이체 지정일자를 신청, 등록하고 지정일자 앞뒤로 3영업일 이내에 월 50만원 이상 입금\n2. 연금수급 실적을 보유한 경우\n주2) 4대연금(국민연금, 공무원연금, 군인연금, 사학연금), 장해연금, 기초(노령)연금만 인정\n3. 신용/체크카드(타사카드 포함) 또는 간편결제(Pay) 결제대금 출금 실적을 보유한 경우\n타사카드: 펌뱅킹, CMS, 오픈뱅킹을 통한 출금내역 中 적요에 '카드' 문구를 포함한 경우\n간편결제: 연결계좌를 간편결제 서비스에 등록한 후 선불금 충전, 결제 등을 통한 실시간 계좌이체가 발생한 경우\n(단, 무통장 입금, 가상계좌 입금, 카드이용 실적은 제외)",
+    "source_url": "https://mybank.ibk.co.kr/uib/jsp/guest/ntr/ntr70/ntr7010/PNTR701000_i2.jsp?grcd=11&lncd=01&pdcd=0007&tmcd=102"
+  },
+  {
+    "sample_id": "U020",
+    "institution": "카카오뱅크",
+    "product": "26주적금 - 자동이체 연속 성공",
+    "source_type": "official web",
+    "source_bundle_text": "자동이체 연속 성공 우대금리\n주차별 자동이체 납입을 연속 성공하고 만기 해지한 경우\n(최대 연 3.00%p)\n제공조건 | 우대금리\n7주 연속 성공 시 | +연 1.00%p\n누적 연 1.00%p 제공\n26주 연속 성공 시 | +연 2.00%p\n누적 연 3.00%p 제공",
+    "source_url": "https://www.kakaobank.com/products/26weeks"
+  },
+  {
+    "sample_id": "U021",
+    "institution": "카카오뱅크",
+    "product": "26주적금 - 실패 후 복구",
+    "source_type": "official web",
+    "source_bundle_text": "26주적금 우대금리는 어떻게 하면 받을 수 있나요?\n우대금리는 7주차 또는 26주차까지 자동이체 납입을 연속으로 성공하고 만기해지하는 경우 제공됩니다. 단, 자동이체 실패 후 빈자리 채우기를 하더라도 우대금리가 제공되지 않으니 주의하세요.",
+    "source_url": "https://www.kakaobank.com/products/26weeks"
+  },
+  {
+    "sample_id": "U022",
+    "institution": "카카오뱅크",
+    "product": "26주적금 - 변경 불가",
+    "source_type": "official web",
+    "source_bundle_text": "26주적금 납입금액과 요일을 변경할 수 있나요?\n26주적금은 최초 가입금액에 따라 매주 납입금액이 자동으로 증액되는 상품입니다. 적금을 개설한 요일마다 자동이체가 진행되며, 납입금액 및 요일 변경은 불가합니다.",
+    "source_url": "https://www.kakaobank.com/products/26weeks"
+  },
+  {
+    "sample_id": "U023",
+    "institution": "카카오뱅크",
+    "product": "자유적금 - 자동이체 우대",
+    "source_type": "official web",
+    "source_bundle_text": "카카오뱅크 자유적금 자동이체를 신청하면 우대금리를 받을 수 있나요?\n카카오뱅크 자유적금은 자동이체 신청뿐 아니라 다음 조건을 충족한 경우에 한하여 자동이체 우대금리를 제공하고 있습니다.\n※ 우대금리 제공조건 및 유의사항\n• 전체 계약월수 중 1/2 이상을 매월 자동이체로 납입을 하고, 만기에 해지하는 경우 납입한 전체 원금에 대해 우대금리 연 0.20%를 추가 제공",
+    "source_url": "https://www.kakaobank.com/products/savings"
+  },
+  {
+    "sample_id": "U024",
+    "institution": "카카오뱅크",
+    "product": "자유적금 - 자동연장 제외",
+    "source_type": "official web",
+    "source_bundle_text": "※ 우대금리 제공조건 및 유의사항\n• 만기시 자동연장을 한 경우 만기 자동연장된 원리금에 대해서는 자동이체 우대금리를 제공하지 않음",
+    "source_url": "https://www.kakaobank.com/products/savings"
+  },
+  {
+    "sample_id": "U025",
+    "institution": "카카오뱅크",
+    "product": "한달적금 - 매일/보너스 우대",
+    "source_type": "official web",
+    "source_bundle_text": "매일/보너스 우대금리\n이 적금에 납입하고 만기 해지한 경우 매일 우대금리와 보너스 우대금리를 합하여 최대 연 5.50%p\n제공조건 | 우대금리\n매일 우대금리 | 매 입금 시마다 + 연 0.10%p / 최대 연 3.10%p 제공\n보너스 우대금리 | 누적하여\n5회 입금 시 + 연 0.20%p\n10회 입금 시 + 연 0.20%p\n15회 입금 시 + 연 0.30%p\n20회 입금 시 + 연 0.30%p\n25회 입금 시 + 연 0.50%p\n31회 입금 시 + 연 0.90%p\n최대 연 2.40%p 제공",
+    "source_url": "https://www.kakaobank.com/products/m1savings"
+  }
+]

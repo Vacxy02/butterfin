@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>금융행동 사전검증 — Action Reversal</title>
+<style>
+  :root { --bg:#F4F6F4; --surface:#FFFFFF; --ink:#131714; --ink-2:#4A544E; --line:#DCE1DD;
+    --accent:#1F4D3F; --crit:#8C2F2A; --crit-sf:#F7E8E6; --warn:#7A5A12; --warn-sf:#F6EFDC;
+    --good-sf:#E4EEE8; --mono:ui-monospace,Consolas,"D2Coding",monospace; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Malgun Gothic",sans-serif;
+    line-height:1.6; padding:32px 20px 80px; }
+  .wrap { max-width:760px; margin:0 auto; }
+  h1 { font-size:26px; margin:0 0 6px; }
+  .snapshot { font-size:13px; color:var(--ink-2); background:var(--surface); border:1px solid var(--line);
+    border-radius:8px; padding:8px 14px; display:inline-block; margin-bottom:24px; }
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:20px 22px; margin-bottom:18px; }
+  label { font-size:13px; font-weight:600; color:var(--ink-2); display:block; margin-bottom:6px; }
+  textarea, input, select { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px;
+    font-size:14px; font-family:inherit; margin-bottom:12px; }
+  button { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 18px;
+    font-size:14px; font-weight:600; cursor:pointer; }
+  button.secondary { background:var(--surface); color:var(--ink); border:1px solid var(--line); }
+  .badge { display:inline-block; padding:5px 14px; border-radius:100px; font-weight:700; font-size:14px; }
+  .badge.PASS { background:var(--good-sf); color:var(--accent); }
+  .badge.REVIEW { background:var(--warn-sf); color:var(--warn); }
+  .badge.HOLD, .badge.EXECUTION_BLOCKED { background:var(--crit-sf); color:var(--crit); }
+  .stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-top:14px; }
+  .stat { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
+  .stat .l { font-size:11px; color:var(--ink-2); text-transform:uppercase; letter-spacing:.05em; }
+  .stat .v { font-family:var(--mono); font-size:16px; font-weight:700; margin-top:2px; }
+  .reason { margin-top:12px; font-size:14px; color:var(--ink-2); }
+  .evidence { margin-top:10px; font-size:12px; color:var(--ink-2); font-family:var(--mono); word-break:break-all; }
+  .interpret-box { font-size:13px; padding:10px 12px; border-radius:8px; margin-top:10px; }
+  .interpret-box.OK { background:var(--good-sf); }
+  .interpret-box.NEED_INFO, .interpret-box.UNSUPPORTED { background:var(--warn-sf); }
+  .interpret-box.ERROR { background:var(--crit-sf); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>금융행동 사전검증 — Action Reversal</h1>
+  <div class="snapshot" id="snapshot">검증 스냅샷 기준일 확인 중…</div>
+
+  <div class="card">
+    <label>1. 하려는 행동을 문장으로 입력하세요</label>
+    <textarea id="actionText" rows="2" placeholder="예: 다음 달부터 카드사용 5만원을 다른 카드로 옮길 거야">다음 달부터 카드사용 5만원을 다른 카드로 옮길 거야</textarea>
+    <button id="interpretBtn">해석하기</button>
+    <div id="interpretResult"></div>
+  </div>
+
+  <div class="card">
+    <label>2. 자동으로 채워진 값 확인 후 검증 실행</label>
+    <select id="actionType">
+      <option value="CARD_SPEND_SHIFT">CARD_SPEND_SHIFT (카드실적 이동)</option>
+      <option value="PRODUCT_TERMINATION">PRODUCT_TERMINATION (상품 해지)</option>
+      <option value="PAYMENT_ACCOUNT_CHANGE">PAYMENT_ACCOUNT_CHANGE (결제계좌 변경)</option>
+      <option value="SALARY_ACCOUNT_CHANGE">SALARY_ACCOUNT_CHANGE (급여계좌 변경)</option>
+    </select>
+    <label>월 이동 금액 (원, CARD_SPEND_SHIFT일 때만)</label>
+    <input id="amount" type="number" value="30000">
+    <label><input id="exceptionMet" type="checkbox" style="width:auto;display:inline;margin-right:6px;">예외 조건(예: 청약 당첨 해지)이 적용됨</label>
+    <button id="evaluateBtn">검증 실행</button>
+  </div>
+
+  <div class="card" id="resultCard" style="display:none;">
+    <div id="decisionBadge"></div>
+    <div class="reason" id="reasonText"></div>
+    <div class="stat-grid" id="statGrid"></div>
+    <div class="evidence" id="evidenceText"></div>
+  </div>
+</div>
+
+<script>
+async function loadSnapshot() {
+  const r = await fetch('/api/health').then(r => r.json()).catch(() => null);
+  const el = document.getElementById('snapshot');
+  if (r) {
+    el.textContent = `검증 스냅샷 기준일: ${r.verified_at || '?'} · 규칙 ${r.rules_loaded}개 로딩 · AR_MODE=${r.ar_mode} · 상태: ${r.status}`;
+  } else {
+    el.textContent = '서버 상태를 확인할 수 없습니다.';
+  }
+}
+loadSnapshot();
+
+document.getElementById('interpretBtn').onclick = async () => {
+  const text = document.getElementById('actionText').value;
+  const box = document.getElementById('interpretResult');
+  box.innerHTML = '해석 중…';
+  try {
+    const res = await fetch('/api/interpret', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text})});
+    const data = await res.json();
+    const d = data.delta;
+    box.innerHTML = `<div class="interpret-box ${d.status}"><b>${d.status}</b> — ${d.action_type || d.clarifying_question || d.reason || ''}${d.amount_monthly ? ' · ' + d.amount_monthly.toLocaleString() + '원' : ''}</div>`;
+    if (d.status === 'OK') {
+      if (d.action_type) document.getElementById('actionType').value = d.action_type;
+      if (d.amount_monthly) document.getElementById('amount').value = d.amount_monthly;
+    }
+  } catch (e) {
+    box.innerHTML = `<div class="interpret-box ERROR">해석 실패: ${e}</div>`;
+  }
+};
+
+document.getElementById('evaluateBtn').onclick = async () => {
+  const action_type = document.getElementById('actionType').value;
+  const amount_monthly = Number(document.getElementById('amount').value);
+  const exception_condition_met = document.getElementById('exceptionMet').checked;
+  const res = await fetch('/api/evaluate', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action_type, amount_monthly, exception_condition_met})});
+  const data = await res.json();
+
+  document.getElementById('resultCard').style.display = 'block';
+  document.getElementById('decisionBadge').innerHTML = `<span class="badge ${data.decision}">${data.decision}</span>`;
+  document.getElementById('reasonText').textContent = data.reason || '';
+
+  const stats = [];
+  if (data.ttb_months !== undefined) stats.push(['Time-to-Breach (TTB)', data.ttb_months !== null ? data.ttb_months + '개월 뒤' : '없음']);
+  if (data.ttr_months !== undefined) stats.push(['Time-to-Reversal (TTR)', data.ttr_months !== null ? data.ttr_months + '개월 뒤' : '없음']);
+  if (data.safe_limit_won !== undefined) stats.push(['Contract-Safe Limit', data.safe_limit_won.toLocaleString() + '원/월']);
+  if (data.matched_rules) stats.push(['매칭 규칙', data.matched_rules.join(', ') || '없음']);
+  document.getElementById('statGrid').innerHTML = stats.map(([l,v]) =>
+    `<div class="stat"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
+
+  document.getElementById('evidenceText').textContent = data.evidence
+    ? `근거: ${data.evidence.source_url} (검증일 ${data.evidence.verified_at})` : '';
+};
+</script>
+</body>
+</html>

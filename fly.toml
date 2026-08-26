@@ -1,0 +1,23 @@
+app = "action-reversal"
+primary_region = "nrt"   # 도쿄 — 한국에서 가장 가까운 Fly 리전
+
+[build]
+
+[env]
+  AR_MODE = "DEMO"
+  PORT = "8000"
+  # GEMINI_API_KEY는 여기 넣지 않는다 — `fly secrets set GEMINI_API_KEY=...`로 설정한다.
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "off"     # 절대 켜지 말 것 — 켜면 무접속 시 내려가서 흰 화면 위험
+  auto_start_machines = true
+  min_machines_running = 1       # 항상 최소 1대 실행 (sleep 방지)
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  path = "/api/health"
+  timeout = "5s"
