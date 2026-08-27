@@ -108,6 +108,19 @@ def api_evaluate():
                         direct_benefit_monthly=direct_benefit)
         sl = safe_limit(hist3=hist3, baseline_monthly=baseline, thresholds=thresholds)
         result = decide(freshness_ok=freshness_ok, inputs_sufficient=True, rule_matched=True, sim=sim)
+
+        # D/L/G(실제 원 금액)와 Action Reversal 여부 — "왜 HOLD인지" 판정 근거가 된
+        # 시점의 값을 보여준다: 위반이 확인된 시점(ttr)이 있으면 그 시점, 없고 구간
+        # 변화 시점(ttb)만 있으면 그 시점, 둘 다 없으면(=PASS) 12개월 누적값.
+        as_of_month = sim.ttr if sim.ttr is not None else (sim.ttb if sim.ttb is not None else len(sim.G) - 1)
+        dlg = {
+            "as_of_month": as_of_month,
+            "direct_won": round(sim.D[as_of_month]),
+            "linked_won": round(sim.L[as_of_month]),
+            "total_won": round(sim.G[as_of_month]),
+        }
+        action_reversal = bool(sim.D[as_of_month] > 0 and sim.G[as_of_month] < 0)
+
         return jsonify({
             **result,
             "matched_rules": [rule["rule_id"]],
@@ -115,6 +128,8 @@ def api_evaluate():
             "ttb_months": sim.ttb,
             "ttr_months": sim.ttr,
             "current_tier_pct_p": sim.tier_effect[0],
+            "dlg": dlg,
+            "action_reversal": action_reversal,
             "evidence": {"source_url": rule["source_url"], "verified_at": rule["verified_at"]},
         })
 
@@ -128,9 +143,15 @@ def api_evaluate():
         exception_text=rule.get("exception"),
     )
     result = decide(freshness_ok=freshness_ok, inputs_sufficient=True, rule_matched=True, discrete=discrete)
+    # 이 유형(해지/계좌변경 등 이산 판정)은 engine.py에 금액 환산 모델이 없다 —
+    # DiscreteEffect는 %p 우대 상실만 판정하고, 이걸 원화로 바꿀 연동잔액 입력을
+    # 받지 않는다. 값을 모르면 지어내지 않고 null로 남긴다(D/L/G가 있는 척하지 않음).
+    dlg = None
     return jsonify({
         **result,
         "matched_rules": [rule["rule_id"]],
+        "dlg": dlg,
+        "action_reversal": discrete.violation,
         "evidence": {"source_url": rule["source_url"], "verified_at": rule["verified_at"]},
     })
 

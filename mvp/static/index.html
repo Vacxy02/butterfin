@@ -59,6 +59,8 @@
     </select>
     <label>월 이동 금액 (원, CARD_SPEND_SHIFT일 때만)</label>
     <input id="amount" type="number" value="30000">
+    <label>이 행동으로 즉시 얻는 이득 (원/월, 선택 — 예: 옮기는 카드의 캐시백. CARD_SPEND_SHIFT일 때만, Action Reversal 판정에 씀)</label>
+    <input id="directBenefit" type="number" value="0">
     <label><input id="exceptionMet" type="checkbox" style="width:auto;display:inline;margin-right:6px;">예외 조건(예: 청약 당첨 해지)이 적용됨</label>
     <button id="evaluateBtn">검증 실행</button>
   </div>
@@ -76,7 +78,7 @@ async function loadSnapshot() {
   const r = await fetch('/api/health').then(r => r.json()).catch(() => null);
   const el = document.getElementById('snapshot');
   if (r) {
-    el.textContent = `검증 스냅샷 기준일: ${r.verified_at || '?'} · 규칙 ${r.rules_loaded}개 로딩 · AR_MODE=${r.ar_mode} · 상태: ${r.status}`;
+    el.textContent = `검증 스냅샷 기준일: ${r.verified_at || '?'} · 규칙 ${r.rules_loaded}개 로딩 · 상태: ${r.status === 'ok' ? '정상' : '점검 필요'}`;
   } else {
     el.textContent = '서버 상태를 확인할 수 없습니다.';
   }
@@ -91,38 +93,76 @@ document.getElementById('interpretBtn').onclick = async () => {
     const res = await fetch('/api/interpret', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text})});
     const data = await res.json();
     const d = data.delta;
-    box.innerHTML = `<div class="interpret-box ${d.status}"><b>${d.status}</b> — ${d.action_type || d.clarifying_question || d.reason || ''}${d.amount_monthly ? ' · ' + d.amount_monthly.toLocaleString() + '원' : ''}</div>`;
+    // 내부 예외 메시지(d.reason)는 화면에 노출하지 않는다 — action_type이나
+    // clarifying_question처럼 사람이 읽을 수 있게 준비된 문구만 보여준다.
+    const shown = d.action_type || d.clarifying_question || (d.status === 'UNSUPPORTED' ? '지원하지 않는 행동 유형입니다.' : '');
+    box.innerHTML = `<div class="interpret-box ${d.status}"><b>${d.status}</b> — ${shown}${d.amount_monthly ? ' · ' + d.amount_monthly.toLocaleString() + '원' : ''}</div>`;
     if (d.status === 'OK') {
       if (d.action_type) document.getElementById('actionType').value = d.action_type;
       if (d.amount_monthly) document.getElementById('amount').value = d.amount_monthly;
     }
   } catch (e) {
-    box.innerHTML = `<div class="interpret-box ERROR">해석 실패: ${e}</div>`;
+    box.innerHTML = `<div class="interpret-box ERROR">해석 요청 중 문제가 발생했습니다. 아래 2번 항목에서 직접 입력해 주세요.</div>`;
   }
 };
+
+function wonOrDash(v) {
+  return (v === null || v === undefined) ? '—' : (v >= 0 ? '+' : '') + v.toLocaleString() + '원';
+}
 
 document.getElementById('evaluateBtn').onclick = async () => {
   const action_type = document.getElementById('actionType').value;
   const amount_monthly = Number(document.getElementById('amount').value);
+  const direct_benefit_monthly = Number(document.getElementById('directBenefit').value) || 0;
   const exception_condition_met = document.getElementById('exceptionMet').checked;
-  const res = await fetch('/api/evaluate', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({action_type, amount_monthly, exception_condition_met})});
-  const data = await res.json();
+
+  let data;
+  try {
+    const res = await fetch('/api/evaluate', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({action_type, amount_monthly, direct_benefit_monthly, exception_condition_met})});
+    if (!res.ok) throw new Error('server_error');
+    data = await res.json();
+  } catch (e) {
+    // fail-closed: 서버/네트워크 문제로 판정을 못 받으면 자동으로 PASS인 척하지
+    // 않는다 — REVIEW로 표시하고 사람 확인을 안내한다.
+    document.getElementById('resultCard').style.display = 'block';
+    document.getElementById('decisionBadge').innerHTML = `<span class="badge REVIEW">REVIEW</span>`;
+    document.getElementById('reasonText').textContent = '서버에서 판정 결과를 받지 못했습니다. 잠시 후 다시 시도하거나 담당자에게 확인해 주세요.';
+    document.getElementById('statGrid').innerHTML = '';
+    document.getElementById('evidenceText').innerHTML = '';
+    return;
+  }
 
   document.getElementById('resultCard').style.display = 'block';
   document.getElementById('decisionBadge').innerHTML = `<span class="badge ${data.decision}">${data.decision}</span>`;
-  document.getElementById('reasonText').textContent = data.reason || '';
+  document.getElementById('reasonText').textContent = data.reason || '판정 사유를 확인할 수 없습니다.';
 
   const stats = [];
   if (data.ttb_months !== undefined) stats.push(['Time-to-Breach (TTB)', data.ttb_months !== null ? data.ttb_months + '개월 뒤' : '없음']);
   if (data.ttr_months !== undefined) stats.push(['Time-to-Reversal (TTR)', data.ttr_months !== null ? data.ttr_months + '개월 뒤' : '없음']);
   if (data.safe_limit_won !== undefined) stats.push(['Contract-Safe Limit', data.safe_limit_won.toLocaleString() + '원/월']);
+  if (data.dlg) {
+    stats.push([`직접효과 D (${data.dlg.as_of_month}개월 시점)`, wonOrDash(data.dlg.direct_won)]);
+    stats.push([`연쇄효과 L (${data.dlg.as_of_month}개월 시점)`, wonOrDash(data.dlg.linked_won)]);
+    stats.push([`전체효과 G = D+L (${data.dlg.as_of_month}개월 시점)`, wonOrDash(data.dlg.total_won)]);
+  } else if (data.dlg === null && 'action_reversal' in data) {
+    stats.push(['D/L/G (실제 원 금액)', '이 유형은 금액 모델 미지원 (%p 우대만 판정)']);
+  }
+  if ('action_reversal' in data) stats.push(['Action Reversal 발생 여부', data.action_reversal ? '예 — 당장은 이득이나 전체 손익은 손실' : '아니오']);
   if (data.matched_rules) stats.push(['매칭 규칙', data.matched_rules.join(', ') || '없음']);
   document.getElementById('statGrid').innerHTML = stats.map(([l,v]) =>
     `<div class="stat"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
 
-  document.getElementById('evidenceText').textContent = data.evidence
-    ? `근거: ${data.evidence.source_url} (검증일 ${data.evidence.verified_at})` : '';
+  const ev = document.getElementById('evidenceText');
+  if (data.evidence && data.evidence.source_url) {
+    const url = data.evidence.source_url;
+    const safeUrl = /^https?:\/\//i.test(url) ? url : null;
+    ev.innerHTML = safeUrl
+      ? `근거: <a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a> (검증일 ${data.evidence.verified_at || '?'})`
+      : `근거: ${url} (검증일 ${data.evidence.verified_at || '?'})`;
+  } else {
+    ev.innerHTML = '';
+  }
 };
 </script>
 </body>

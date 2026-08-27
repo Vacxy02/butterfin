@@ -15,8 +15,16 @@ System A(정규식 기준선)와 Gate(EvidenceGate)만 있고, System B/C가 호
 DEV25 SCHEMA가 요구하는 14필드에는 못 쓴다 — 그래서 프롬프트/스키마만 넓게 새로 짜고
 호출·캐시·에러 처리는 ai_rule의 내부 헬퍼(_invoke)를 그대로 부른다.
 
-System B = compile_raw()        Gemini 출력 그대로, Gate 없음.
-System C = compile_with_gate()  B의 출력을 blind25_fixed.EvidenceGate로 검증.
+System B = compile_raw()   Gemini 호출, 넓은 스키마 추출, Gate 없음.
+System C = gate_only()     **Gemini를 다시 호출하지 않는다.** System B가 이미 뽑은
+                            fields를 그대로 받아 blind25_fixed.EvidenceGate만 적용한다
+                            (박승렬 지시: "C는 Gemini 다시 호출하면 안 되고 B에서 나온
+                            결과 그대로 재사용해서 Evidence/Schema Gate만 적용"). 실제
+                            호출 조립은 dev25_runner.py가 한다 — B의 3회 결과를 각각
+                            gate_only()에 넘겨 C의 3회를 만든다.
+            compile_with_gate()  위 조합을 혼자 쓰고 싶을 때만 쓰는 편의 함수 —
+                            이건 내부적으로 compile_raw()를 새로 호출하므로 DEV25
+                            runner의 System C 자리에는 쓰지 않는다.
 
 GEMINI_API_KEY가 없으면 (이 개발 환경처럼) "그럴듯한 가짜 응답을 지어내지" 않는다.
 ai_rule.py와 같은 원칙 — 모르면 비워두고 정직하게 실패로 표시한다. 실제 DEV25 결과로
@@ -28,9 +36,10 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import sys
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 ROOT = os.environ.get("AR_ROOT", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(ROOT, "mvp"))
@@ -110,10 +119,16 @@ def _prompt_hash() -> str:
     return hashlib.sha256((_WIDE_PROMPT + PROMPT_VERSION).encode("utf-8")).hexdigest()[:12]
 
 
-def _clean(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """빈 문자열/빈 배열/None을 걷어내고 ExtendedRuleSchema로 한 번 검증한다."""
+def _clean(data: Optional[Dict[str, Any]]) -> Tuple[Dict[str, Any], bool, List[str]]:
+    """빈 문자열/빈 배열/None을 걷어내고 ExtendedRuleSchema로 필드 단위 검증한다.
+
+    반환: (정제된 필드, schema_valid, 필드별 검증 실패 로그)
+    schema_valid는 "Gemini가 응답을 주긴 줬는데 그 안에 스키마를 어긴 필드가
+    하나라도 있었는가"를 뜻한다 — data 자체가 없으면(호출 실패) 검증할 대상이
+    없으므로 True로 둔다(무응답과 "응답은 왔는데 형식이 틀림"을 구분하기 위함).
+    """
     if not data:
-        return {}
+        return {}, True, []
 
     def _stringify(v: Any) -> Any:
         # 스키마는 전부 문자열 필드인데, Gemini가 숫자처럼 보이는 값을 구조화 출력
@@ -144,15 +159,51 @@ def _clean(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     # 나머지는 살린다 — 통째로 폐기하지 않는다. (전체 한 번에 검증했다가 실패하면
     # 전부 버려지던 버그를 여기서 필드 단위로 나눠서 고쳤다.)
     result: Dict[str, Any] = {}
+    errors: List[str] = []
     for k, v in trimmed.items():
         try:
             single = ExtendedRuleSchema(**{k: v})
-        except Exception:
+        except Exception as e:
+            errors.append(f"schema:{k}: {e}")
             continue
         dumped = single.model_dump(exclude_none=True, exclude_defaults=True)
         if k in dumped:
             result[k] = dumped[k]
-    return result
+    return result, (len(errors) == 0), errors
+
+
+# 429(RESOURCE_EXHAUSTED)/5xx/timeout에만 재시도한다 — 키 없음/스키마 오류처럼
+# 재시도해도 안 될 실패나, "답이 마음에 안 든다"는 이유로는 절대 재시도하지 않는다
+# (박승렬 지시: 유효한 응답이 한 번 나오면 그걸 그대로 쓴다). 2026-08-26 실측:
+# DEV25 175행(호출 150회)을 쉬지 않고 쏘면 무료 등급 분당 한도에 걸려 초반 몇 건만
+# 성공하고 나머지가 전부 막혔다.
+_RATE_LIMIT_RETRY_DELAYS = (15, 30, 60)  # 초, 점점 늘려가며 최대 3회 재시도
+
+_HTTP_STATUS_RE = re.compile(r"\b([45]\d{2})\b")
+
+
+def _extract_http_status(err: Optional[str]) -> Optional[int]:
+    """에러 문자열에서 HTTP 상태코드를 뽑는다 (예: "HTTP Error 429: ...", "500 Internal ..."). 못 찾으면 None."""
+    if not err:
+        return None
+    m = _HTTP_STATUS_RE.search(err)
+    return int(m.group(1)) if m else None
+
+
+def _is_retryable(err: Optional[str]) -> bool:
+    """429/5xx/timeout일 때만 True. 스키마 오류·키 없음 등은 재시도해도 결과가
+    바뀌지 않으므로 False — 여기서 걸러야 불필요한 대기 시간을 안 쓴다."""
+    if not err:
+        return False
+    if "429" in err or "RESOURCE_EXHAUSTED" in err:
+        return True
+    status = _extract_http_status(err)
+    if status is not None and status >= 500:
+        return True
+    low = err.lower()
+    if "timeout" in low or "timed out" in low or "time out" in low:
+        return True
+    return False
 
 
 def compile_raw(source_text: str, rule_id: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -161,46 +212,93 @@ def compile_raw(source_text: str, rule_id: Optional[str] = None) -> Tuple[Dict[s
     ai_rule._invoke를 그대로 재사용 — 라이브 우선, 실패하면 캐시, 어느 쪽인지
     source로 표시된다. 키/SDK/캐시가 전부 없으면 (None, "cache")가 돌아온다 —
     이 경우 정직하게 빈 결과 + 실패 사유를 meta에 남긴다(가짜 값으로 채우지 않는다).
+    429/5xx/timeout이면 잠깐 쉬었다가 최대 3번까지 다시 시도한다. 그 외 실패
+    (스키마 오류, 키 없음, 파싱 실패 등)는 재시도하지 않고 그대로 실패 처리한다.
+    "답이 마음에 안 들어서" 다시 부르는 재시도는 여기 어디에도 없다 — 유효한
+    응답이 한 번 오면(=재시도 대상이 아니면) 그걸 그대로 최종값으로 쓴다.
     """
     t0 = time.time()
     # .format()이 아니라 치환을 쓴다 — 프롬프트 안에 {threshold, effect_value} 같은
     # 예시 중괄호가 있어서 str.format()이 이걸 플레이스홀더로 오인해 KeyError가 난다.
     prompt = _WIDE_PROMPT.replace("{clause}", source_text.strip())
+
+    retry_count = 0
+    error_log: List[str] = []
+
     data, source = ai_rule._invoke("wide_compile", source_text, prompt, _WIDE_SCHEMA)
+    if data is None and ai_rule.last_error():
+        error_log.append(ai_rule.last_error())
+
+    for delay in _RATE_LIMIT_RETRY_DELAYS:
+        if data is not None or not _is_retryable(ai_rule.last_error()):
+            break
+        retry_count += 1
+        time.sleep(delay)
+        data, source = ai_rule._invoke("wide_compile", source_text, prompt, _WIDE_SCHEMA)
+        if data is None and ai_rule.last_error():
+            error_log.append(ai_rule.last_error())
+
     latency_ms = int((time.time() - t0) * 1000)
 
-    fields = _clean(data)
+    fields, schema_valid, schema_errors = _clean(data)
+    error_log.extend(schema_errors)
+
     ok = bool(fields)  # rule_id를 채우기 전에 판단 — rule_id는 우리가 넣은 fallback이지
                        # AI가 뽑은 내용이 아니므로 "추출 성공" 여부에 넣으면 안 된다.
     if rule_id and not fields.get("rule_id"):
         fields["rule_id"] = rule_id
+
+    final_err = ai_rule.last_error() if not ok else None
+    http_status = _extract_http_status(final_err)
+    if http_status is None and ok and source == ai_rule.SOURCE_LIVE:
+        http_status = 200  # 실제로 라이브 호출이 성공했을 때만 200으로 표시한다
+
     meta = {
         "model_name": ai_rule._MODEL if source == ai_rule.SOURCE_LIVE else f"{ai_rule._MODEL} (캐시/미실행)",
         "prompt_version": f"{PROMPT_VERSION}_{_prompt_hash()}",
         "latency_ms": latency_ms,
         "raw_output_json": data,
         "source": source,
+        "schema_valid": schema_valid,
         "accepted": "Y" if ok else "N",
-        "reject_reason": None if ok else (ai_rule.last_error() or "추출된 필드 없음 (키/캐시 없음)"),
+        "reject_reason": None if ok else (final_err or "추출된 필드 없음 (키/캐시 없음)"),
+        "http_status": http_status,
+        "retry_count": retry_count,
+        "error_log": error_log,
     }
     return fields, meta
 
 
-def compile_with_gate(source_text: str, rule_id: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """System C: B의 출력을 blind25_fixed.EvidenceGate(ai_rule.ungrounded_numbers 기반)로 검증."""
-    fields, meta = compile_raw(source_text, rule_id)
-    if meta["accepted"] == "N":
-        # B 단계에서 이미 추출 실패면 Gate를 다시 돌릴 대상이 없다.
-        return fields, meta
+def gate_only(fields: Dict[str, Any], source_text: str) -> Tuple[str, Optional[str], int]:
+    """System C 전용 진입점: 이미 뽑혀 있는 fields(=System B의 출력)에 Gate만
+    적용한다. **여기서는 Gemini를 절대로 호출하지 않는다** — DEV25 runner가
+    System B의 3회 결과를 그대로 넘겨서 이 함수만 부르면 C의 3회가 완성된다.
 
+    반환: (accepted "Y"/"N", reject_reason, gate_latency_ms)
+    """
+    t0 = time.time()
     verdict = EvidenceGate.verify(fields, source_text)
-    meta = dict(meta)  # B의 meta를 변형하지 않고 복사해서 갱신
-    meta["accepted"] = "Y" if verdict["accepted"] else "N"
-    meta["reject_reason"] = verdict["reject_reason"]
+    gate_latency_ms = int((time.time() - t0) * 1000)
+    return ("Y" if verdict["accepted"] else "N"), verdict["reject_reason"], gate_latency_ms
+
+
+def compile_with_gate(source_text: str, rule_id: Optional[str] = None) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """단독 호출용 편의 함수(자가진단 등)다 — compile_raw()로 Gemini를 새로 한 번
+    호출한 뒤 gate_only()를 적용한다. **DEV25 runner는 이 함수를 쓰지 않는다** —
+    System C가 Gemini를 다시 호출하면 안 되기 때문에, runner는 System B의 이미
+    계산된 결과를 gate_only()에 직접 넘긴다 (dev25_runner.py의 _row_from_c 참고)."""
+    fields, meta = compile_raw(source_text, rule_id)
+    meta = dict(meta)
+    if meta["accepted"] == "N":
+        return fields, meta
+    accepted, reject_reason, gate_latency_ms = gate_only(fields, source_text)
+    meta["accepted"] = accepted
+    meta["reject_reason"] = reject_reason
+    meta["gate_latency_ms"] = gate_latency_ms
     return fields, meta
 
 
-__all__ = ["compile_raw", "compile_with_gate", "PROMPT_VERSION"]
+__all__ = ["compile_raw", "gate_only", "compile_with_gate", "PROMPT_VERSION"]
 
 
 if __name__ == "__main__":

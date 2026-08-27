@@ -57,7 +57,10 @@ def check_health(base_url: str, report: dict) -> None:
                               "got": body.get("verified_at")})
 
 
-def _post_json(url: str, payload: dict, timeout=15):
+def _post_json(url: str, payload: dict, timeout=40):
+    # /api/interpret는 실제 Gemini 호출을 포함한다(내부 타임아웃 20s). 배포 환경(Render 등)의
+    # 네트워크 경로가 로컬보다 느릴 수 있어 여유 있게 잡는다 — 너무 짧으면 서버는 멀쩡한데
+    # 검증 스크립트만 타임아웃 나는 오탐이 생긴다.
     req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
                                   headers={"Content-Type": "application/json"}, method="POST")
     with urllib.request.urlopen(req, timeout=timeout) as r:

@@ -92,9 +92,16 @@ def interpret(text: str, force_mock: bool = False) -> Tuple[TypedActionDelta, Di
     try:
         result = call_gemini_json(SYSTEM_PROMPT, text)
     except GeminiError as e:
-        delta = TypedActionDelta(status="ERROR", raw_text=text, reason=str(e))
+        # fail-closed: Gemini 호출이 실패해도 500으로 죽지 않고 NEED_INFO로 넘겨서
+        # 사람이 2번 항목에서 행동 유형/금액을 직접 입력하는 수동 경로로 이어지게 한다.
+        # 원문 예외 메시지(예: "HTTP Error 429: ...")는 내부 사정이라 공개 화면에 그대로
+        # 보여주지 않는다 — 서버 쪽 meta["error"]에만 남겨서 로그/디버깅에 쓴다.
+        delta = TypedActionDelta(
+            status="NEED_INFO", raw_text=text,
+            clarifying_question="자동 해석에 실패했습니다. 아래 2번 항목에서 행동 유형과 금액을 직접 선택해 주세요.",
+        )
         return delta, {"model_name": os.environ.get("GEMINI_MODEL", "gemini-2.0-flash"),
-                        "prompt_version": PROMPT_VERSION}
+                        "prompt_version": PROMPT_VERSION, "error": str(e)}
 
     raw = _double_check(result["parsed"])
     delta = TypedActionDelta(status=raw.get("status", "ERROR"), action_type=raw.get("action_type"),
