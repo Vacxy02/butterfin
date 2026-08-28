@@ -16,15 +16,23 @@ import os
 import time
 from flask import Flask, request, jsonify, send_from_directory
 
+import hashlib
+import json
+
 from rule_store import RuleStore
 from action_interpreter import interpret
-from engine import simulate, safe_limit, decide, evaluate_discrete_rule, tier_lookup
+from engine import simulate, safe_limit, decide, evaluate_discrete_rule, tier_lookup, compute_safe_zone, ENGINE_VERSION
 
 APP_START = time.time()
 AR_MODE = os.environ.get("AR_MODE", "DEMO")
 
 app = Flask(__name__, static_folder="static")
 store = RuleStore()
+
+# rule_ledger_hash — 지금 로딩된 demo_rules.json 내용의 해시. API 응답에 실어서
+# "지금 이 판정이 어느 버전의 규칙집합을 근거로 나왔는지" 추적 가능하게 한다.
+with open(store.path, "rb") as _f:
+    RULE_LEDGER_HASH = hashlib.sha256(_f.read()).hexdigest()
 
 # 데모 기본값 (사용자가 안 채우면 이 값 사용 — 업무지시서 §5 데모 시나리오)
 DEFAULT_HIST3 = [220000, 220000, 220000]
@@ -52,6 +60,12 @@ def health():
         "verified_at": store._data.get("_meta", {}).get("verified_at"),
         "self_check": checks,
         "uptime_s": round(time.time() - APP_START, 1),
+        # 2026-08-28: 프론트가 "어느 상품으로 좁힐지" 드롭다운을 그릴 때 이 목록을
+        # 쓴다 — demo_rules.json이 바뀌어도 프론트를 따로 안 고쳐도 되게 하기 위함.
+        # institutions/products는 독립적인 두 축이다(은행명만으로는 상품을 특정할 수
+        # 없어서 둘 다 필요).
+        "institutions": store.known_institutions(),
+        "products": store.known_products(),
     }), (200 if ok else 503)
 
 
@@ -72,12 +86,16 @@ def api_evaluate():
     body = request.get_json(force=True, silent=True) or {}
     action_type = body.get("action_type")
     institution = body.get("institution")
+    product = body.get("product")
 
     if not action_type:
         return jsonify({"decision": "REVIEW", "reason": "행동 유형이 확인되지 않았습니다.",
                          "matched_rules": []}), 200
 
-    matched = store.match(action_type, institution)
+    # institution과 product는 독립적으로 좁힌다 — 은행명만으로 상품을 특정할 수 없다
+    # (사용자 지적 반영, 2026-08-28). 둘 다 없거나 실제 등록된 값과 안 맞으면
+    # rule_store.match()의 자체 fallback으로 안전하게 전체 후보로 돌아간다.
+    matched = store.match(action_type, institution, product)
     freshness_ok = store.all_fresh([r["rule_id"] for r in matched]) if matched else False
     rule_matched = len(matched) > 0
 
@@ -85,52 +103,86 @@ def api_evaluate():
         result = decide(freshness_ok=True, inputs_sufficient=True, rule_matched=False)
         return jsonify({**result, "matched_rules": []})
 
-    # CARD_SPEND_SHIFT — 연속 시뮬레이션 (Safe Limit/TTB/TTR)
+    # CARD_SPEND_SHIFT — 연속 시뮬레이션 (Safe Zone/TTB/TTR). 수학 v1.2(2026-08-28):
+    # 매칭된 계약(규칙) 전부를 engine.compute_safe_zone에 넘겨서 "다중계약 중 가장
+    # 엄격한 계약이 무엇인지(binding_constraints)"까지 계산한다 — 예전엔 첫 번째로
+    # 매칭된 규칙 하나만 썼다.
     if action_type == "CARD_SPEND_SHIFT":
-        rule = next((r for r in matched if r.get("tiers") and "min_won" in r["tiers"][0]), matched[0])
-        thresholds = _rule_to_thresholds(rule)
-        if not thresholds:
+        qualifying_rules = [r for r in matched if r.get("tiers") and "min_won" in r["tiers"][0]]
+        if not qualifying_rules:
             return jsonify({"decision": "REVIEW",
                              "reason": "매칭된 규칙에 구간 정보가 없어 자동 계산할 수 없습니다.",
-                             "matched_rules": [rule["rule_id"]]})
+                             "matched_rules": [r["rule_id"] for r in matched]})
         amount = body.get("amount_monthly")
         if amount is None or amount <= 0:
             result = decide(freshness_ok=freshness_ok, inputs_sufficient=False, rule_matched=True)
-            return jsonify({**result, "matched_rules": [rule["rule_id"]]})
+            return jsonify({**result, "matched_rules": [r["rule_id"] for r in qualifying_rules]})
 
         hist3 = body.get("hist3") or DEFAULT_HIST3
         baseline = body.get("baseline_monthly") or DEFAULT_BASELINE
         linked_balance = body.get("linked_balance", 100_000_000)
         direct_benefit = body.get("direct_benefit_monthly", 0)
 
+        by_id = {r["rule_id"]: r for r in qualifying_rules}
+        rules_for_engine = [{"rule_id": r["rule_id"], "thresholds": _rule_to_thresholds(r)} for r in qualifying_rules]
+
+        # 이 배포는 실제로 확인된 상태 불확실성(Θ) 데이터를 갖고 있지 않다(hist3/
+        # baseline은 사용자가 입력한 점추정값 그대로) — 그래서 uncertainty_scenarios를
+        # 넘기지 않는다. 그 결과 robust_status는 항상 NOT_APPLICABLE로 정직하게
+        # 나온다(임의 버퍼를 만들지 않는다는 명세 §5 원칙).
+        zone = compute_safe_zone(hist3=hist3, baseline_monthly=baseline, rules=rules_for_engine,
+                                  planned_x=amount, linked_balance=linked_balance,
+                                  direct_benefit_monthly=direct_benefit)
+
+        # decide()/TTB/TTR은 여러 계약 중 가장 엄격한(binding) 계약 기준으로 계산한다 —
+        # 그게 실제로 먼저 문제가 될 계약이기 때문이다.
+        binding_rule = by_id[zone.binding_constraints[0]]
         sim = simulate(hist3=hist3, baseline_monthly=baseline, shift_monthly=amount,
-                        thresholds=thresholds, linked_balance=linked_balance,
+                        thresholds=_rule_to_thresholds(binding_rule), linked_balance=linked_balance,
                         direct_benefit_monthly=direct_benefit)
-        sl = safe_limit(hist3=hist3, baseline_monthly=baseline, thresholds=thresholds)
         result = decide(freshness_ok=freshness_ok, inputs_sufficient=True, rule_matched=True, sim=sim)
 
         # D/L/G(실제 원 금액)와 Action Reversal 여부 — "왜 HOLD인지" 판정 근거가 된
         # 시점의 값을 보여준다: 위반이 확인된 시점(ttr)이 있으면 그 시점, 없고 구간
         # 변화 시점(ttb)만 있으면 그 시점, 둘 다 없으면(=PASS) 12개월 누적값.
         as_of_month = sim.ttr if sim.ttr is not None else (sim.ttb if sim.ttb is not None else len(sim.G) - 1)
-        dlg = {
-            "as_of_month": as_of_month,
-            "direct_won": round(sim.D[as_of_month]),
-            "linked_won": round(sim.L[as_of_month]),
-            "total_won": round(sim.G[as_of_month]),
-        }
-        action_reversal = bool(sim.D[as_of_month] > 0 and sim.G[as_of_month] < 0)
+        D_won = round(sim.D[as_of_month])
+        L_won = round(sim.L[as_of_month])
+        G_won = round(sim.G[as_of_month])
+        reversal = bool(sim.D[as_of_month] > 0 and sim.G[as_of_month] < 0)
+
+        evidence = [{"rule_id": r["rule_id"], "source_url": r["source_url"], "verified_at": r["verified_at"]}
+                    for r in qualifying_rules]
 
         return jsonify({
             **result,
-            "matched_rules": [rule["rule_id"]],
-            "safe_limit_won": sl,
+            "matched_rules": [r["rule_id"] for r in qualifying_rules],
+            # 05_API_응답_권장스키마.json 형식
+            "action": {"type": action_type, "amount": amount, "unit": "원"},
+            "effects": {"D": D_won, "L": L_won, "G": G_won, "reversal": reversal},
+            "safety": {
+                "nominal_safe_limit": zone.nominal_safe_limit,
+                "robust_safe_limit": zone.robust_safe_limit,
+                "robust_status": zone.robust_status,
+                "robust_safe_zone": zone.robust_safe_zone,
+                "warning_zone": zone.warning_zone,
+                "current_zone": zone.current_zone,
+                "binding_constraints": zone.binding_constraints,
+                "financial_cliff": zone.financial_cliff,
+                "cliff_status": zone.cliff_status,
+                "optimal_safe_range": zone.optimal_safe_range,
+                "optimal_status": zone.optimal_status,
+            },
+            "time": {"TTB": sim.ttb, "TTR": sim.ttr, "unit": "month"},
+            "evidence": evidence,
+            "engine_meta": {"engine_version": ENGINE_VERSION, "rule_ledger_hash": RULE_LEDGER_HASH},
+            # 구버전 호환 필드 — 기존 verify_deploy.py/프론트 캐시가 참조할 수 있어 유지
+            "safe_limit_won": zone.nominal_safe_limit,
             "ttb_months": sim.ttb,
             "ttr_months": sim.ttr,
             "current_tier_pct_p": sim.tier_effect[0],
-            "dlg": dlg,
-            "action_reversal": action_reversal,
-            "evidence": {"source_url": rule["source_url"], "verified_at": rule["verified_at"]},
+            "dlg": {"as_of_month": as_of_month, "direct_won": D_won, "linked_won": L_won, "total_won": G_won},
+            "action_reversal": reversal,
         })
 
     # PRODUCT_TERMINATION / PAYMENT_ACCOUNT_CHANGE / SALARY_ACCOUNT_CHANGE — 이산 판정
@@ -143,16 +195,30 @@ def api_evaluate():
         exception_text=rule.get("exception"),
     )
     result = decide(freshness_ok=freshness_ok, inputs_sufficient=True, rule_matched=True, discrete=discrete)
-    # 이 유형(해지/계좌변경 등 이산 판정)은 engine.py에 금액 환산 모델이 없다 —
-    # DiscreteEffect는 %p 우대 상실만 판정하고, 이걸 원화로 바꿀 연동잔액 입력을
-    # 받지 않는다. 값을 모르면 지어내지 않고 null로 남긴다(D/L/G가 있는 척하지 않음).
+    # 이 유형(해지/계좌변경 등 이산 판정)은 engine.py에 금액 환산 모델도, Safe Zone
+    # 개념도 없다(수학 v1.2 명세는 1차원 연속 행동만 다룬다) — DiscreteEffect는 %p
+    # 우대 상실만 판정한다. 값을 모르면 지어내지 않고 null/NOT_APPLICABLE로 남긴다.
     dlg = None
+    evidence = [{"rule_id": rule["rule_id"], "source_url": rule["source_url"], "verified_at": rule["verified_at"]}]
     return jsonify({
         **result,
         "matched_rules": [rule["rule_id"]],
+        "action": {"type": action_type, "amount": None, "unit": None},
+        "effects": {"D": None, "L": None, "G": None, "reversal": discrete.violation},
+        "safety": {
+            "nominal_safe_limit": None, "robust_safe_limit": None, "robust_status": "NOT_APPLICABLE",
+            "robust_safe_zone": {"min": None, "max": None},
+            "warning_zone": {"min_exclusive": None, "max_inclusive": None},
+            "current_zone": "NOT_APPLICABLE", "binding_constraints": [rule["rule_id"]],
+            "financial_cliff": None, "cliff_status": "NOT_APPLICABLE",
+            "optimal_safe_range": None, "optimal_status": "NOT_APPLICABLE",
+        },
+        "time": {"TTB": None, "TTR": None, "unit": None},
+        "evidence": evidence,
+        "engine_meta": {"engine_version": ENGINE_VERSION, "rule_ledger_hash": RULE_LEDGER_HASH},
+        # 구버전 호환 필드
         "dlg": dlg,
         "action_reversal": discrete.violation,
-        "evidence": {"source_url": rule["source_url"], "verified_at": rule["verified_at"]},
     })
 
 

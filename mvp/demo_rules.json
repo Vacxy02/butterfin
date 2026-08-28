@@ -2,7 +2,8 @@
   "_meta": {
     "source": "공모전_Evidence Bundle.docx (2026-08-25 팀 최신본)",
     "verified_at": "2026-08-25",
-    "note": "전부 evidence_span이 공식 원문에 존재함을 사람이 확인한 규칙만 등록. freshness=FRESH는 이 승인을 거쳤다는 뜻."
+    "note": "전부 evidence_span이 공식 원문에 존재함을 사람이 확인한 규칙만 등록. freshness=FRESH는 이 승인을 거쳤다는 뜻.",
+    "ledger_cross_check": "2026-08-28: action_reversal_rule_ledger_v3.csv(37행, 박승렬 제공)와 대조 완료. 8개 규칙 전부 원장 rule_id로 추적 가능 — 각 규칙의 ledger_rule_ids 필드 참고. source_url도 원장의 실제 URL로 교체함(기존엔 설명 텍스트였음). 최초 대조에서 3건(HANA_HISTORY_SAVINGS effect_pct_p, SHINHYUP_CARD_USAGE 하위 구간, HF_SUBSCRIPTION_DIDIMDOL 신혼부부 금리하한)이 원장/evidence_bundle에서 안 보여 unverified로 표시했는데, 같은 날 각 공식 페이지/원본 PDF를 직접 재조회해서 세 값 전부 사실로 확인함 — 원장 자체가 이 3개 행을 아직 안 만들었을 뿐 값은 맞았음. 해당 규칙마다 ledger_reconfirmed_2026-08-28 필드에 근거를 남겼고, 원장에 추가해야 할 신규 행 이름(HF_RATE_FLOOR_NEWLYWED, SHINHYUP_CARD_USAGE_T1)도 ledger_rule_ids에 미리 반영해둠."
   },
   "rules": [
     {
@@ -19,7 +20,8 @@
         {"min_won": 900000, "effect_pct_p": 0.3}
       ],
       "recalc_frequency": "대출신규 3개월 이후 매월 재산정",
-      "source_url": "KB국민은행 대출상품 페이지 > 금리 및 이율 > 우대금리",
+      "source_url": "https://obank.kbstar.com/quics?page=C020709&cc=b032425:b033525&prcode=LN20000066",
+      "ledger_rule_ids": ["KB_CARD_LOAN_STEP_T1", "KB_CARD_LOAN_STEP_T2", "KB_CARD_LOAN_STEP_T3"],
       "verified_at": "2026-08-25",
       "freshness": "FRESH"
     },
@@ -33,7 +35,8 @@
       "threshold_won": 300000,
       "effect_pct_p": 0.1,
       "attribution_rule": "적립식예금 계좌 보유",
-      "source_url": "KB국민은행 대출상품 페이지, 우대금리 ③",
+      "source_url": "https://obank.kbstar.com/quics?page=C020709&cc=b032425:b033525&prcode=LN20000066",
+      "ledger_rule_ids": ["KB_SAVINGS_LOAN_HOLD"],
       "verified_at": "2026-08-25",
       "freshness": "FRESH"
     },
@@ -56,7 +59,9 @@
       "rate_floor_newlywed_pct": 1.2,
       "cap_pct_p": 0.5,
       "cap_multi_child_pct_p": 0.7,
-      "source_url": "주금공 「내집마련 디딤돌대출 업무처리기준」 13~14p",
+      "source_url": "https://www.hf.go.kr/cms/etcResourceDown.do?site=$cms$NYeyA&key=$cms$M4VwRgDAjA+qmwgJhtGSBsENKQOgAcATAMyA",
+      "ledger_rule_ids": ["HF_SUBSCRIPTION_DIDIMDOL_T1", "HF_SUBSCRIPTION_DIDIMDOL_T2", "HF_SUBSCRIPTION_DIDIMDOL_T3", "HF_CHECK_CYCLE", "HF_EXEMPT_WINNING", "HF_EFFECT_TIMING", "HF_RATE_FLOOR", "HF_CAP", "HF_LATE_PAYMENT", "HF_RATE_FLOOR_NEWLYWED"],
+      "ledger_reconfirmed_2026-08-28": "rate_floor_newlywed_pct(1.2%)는 주금공 「내집마련 디딤돌대출 업무처리기준」 원본 PDF 17쪽에 원문 그대로 있음: '다만, 생애최초 신혼가구인 경우에는 우대금리 적용 후 최종 대출금리가 연 1.2% 미만인 경우 연 1.2% 적용'. 다만 원장 37행에는 아직 이 값의 정식 행(HF_RATE_FLOOR_NEWLYWED)이 없어서 rule_id를 위 ledger_rule_ids에 미리 적어둠 — 원장에 그 행이 실제로 추가되면 그대로 맞아떨어짐.",
       "verified_at": "2026-08-25",
       "freshness": "FRESH"
     },
@@ -72,7 +77,8 @@
       "attribution_rule": "케이뱅크 입출금통장 또는 케이뱅크 체크카드",
       "exception": "알뜰폰(MVNO) 등은 제외",
       "cap_pct_p": 0.6,
-      "source_url": "케이뱅크 주거래우대 자유적금 공식 페이지",
+      "source_url": "https://www.kbanknow.com/web/product/deposit/primary-saving",
+      "ledger_rule_ids": ["KBANK_TELECOM_SAVINGS", "KBANK_CAP"],
       "verified_at": "2026-08-25",
       "freshness": "FRESH"
     },
@@ -86,7 +92,8 @@
       "window_months": 3,
       "threshold_won_per_month": 500000,
       "effect_pct_p": 0.1,
-      "source_url": "신협 「플러스정기적금(신한카드연계형)」 공식 상품 페이지 > 우대조건 및 우대이율표",
+      "source_url": "https://www.cu.co.kr/product/ad/fnncGoods/selectFnncGoodsDpstInfo50.do?fnncGoodsSn=1080",
+      "ledger_rule_ids": ["SHINHYUP_SALARY"],
       "verified_at": "2026-08-25",
       "freshness": "FRESH"
     },
@@ -99,7 +106,8 @@
       "condition": "우대 대상 신협-신한 제휴카드의 결제계좌로 신협계좌 등록, 적금 만기 해지 시까지 유지",
       "effect_pct_p": 0.2,
       "attribution_rule": "신협계좌를 해당 제휴카드의 결제계좌로 등록",
-      "source_url": "신협 「플러스정기적금(신한카드연계형)」 공식 상품 페이지 > 우대조건 및 우대이율표",
+      "source_url": "https://www.cu.co.kr/product/ad/fnncGoods/selectFnncGoodsDpstInfo50.do?fnncGoodsSn=1080",
+      "ledger_rule_ids": ["SHINHYUP_CARD_ACCOUNT"],
       "verified_at": "2026-08-25",
       "freshness": "FRESH"
     },
@@ -117,7 +125,9 @@
         {"count_min": 8, "count_max": null, "effect_pct_p": 5.0}
       ],
       "note": "연속 여부는 따지지 않음. 선행조건(신규발급·마케팅 동의) 별도 존재",
-      "source_url": "신협 「플러스정기적금(신한카드연계형)」 공식 상품 페이지",
+      "source_url": "https://www.cu.co.kr/product/ad/fnncGoods/selectFnncGoodsDpstInfo50.do?fnncGoodsSn=1080",
+      "ledger_rule_ids": ["SHINHYUP_CARD_USAGE_T2", "SHINHYUP_CARD_USAGE_T1"],
+      "ledger_reconfirmed_2026-08-28": "4~7회(2.5%p) 구간은 신협 공식 상품 페이지 본문에 8회 이상(5.0%p) 구간과 나란히 있음(원장 source_url 그대로 재조회 확인): '적금 가입월 포함 9개월 간 매월 10만원 이상 이용한 횟수가 4회 이상 7회 이하인 경우 연 2.5%p'. 원장이 상위 구간만 정식 행(SHINHYUP_CARD_USAGE)으로 만들고 하위 구간 행(SHINHYUP_CARD_USAGE_T1)을 아직 안 만들었을 뿐 — 값 자체는 확인됨. 원장에 그 행이 추가되면 그대로 맞아떨어짐.",
       "verified_at": "2026-08-25",
       "freshness": "FRESH"
     },
@@ -130,7 +140,9 @@
       "condition": "가입 전일 기준 6개월 동안 하나은행 상품 미보유",
       "window_months": 6,
       "effect_pct_p": 4.70,
-      "source_url": "하나은행 「오늘부터, 하나 적금」 공식 상품 페이지",
+      "source_url": "https://www.kebhana.com/cont/mall/mall08/mall0801/mall080102/1510520_115157.jsp",
+      "ledger_rule_ids": ["HANA_HISTORY_SAVINGS"],
+      "ledger_reconfirmed_2026-08-28": "effect_pct_p(4.70%p)는 하나은행 「오늘부터, 하나 적금」 공식 페이지에 원문 그대로 있음(원장 source_url 그대로 재조회 확인): '첫거래우대 (연 4.70%) — 이 예금의 가입 전일 기준 6개월 동안 하나은행 상품을 미보유한 경우'. 이 상품은 신규고객 특판(기본 2.00%/최고 7.70%/월 20만원 한도)이라 다른 규칙들(0.1~0.3%p대)보다 우대폭이 큰 게 정상. 원장이 이 행을 SENTINEL로만 다루면서 effect_value 칸을 비워둔 게 원인 — 원장에 effect_value=4.7 보강 권장(부수 발견: 원장의 effect_kind가 rate_discount인데 rate_bonus가 정합).",
       "verified_at": "2026-08-25",
       "freshness": "FRESH"
     }

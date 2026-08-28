@@ -36,6 +36,15 @@ class TypedActionDelta:
     raw_text: Optional[str] = None
     clarifying_question: Optional[str] = None
     reason: Optional[str] = None
+    # 2026-08-28 추가: 문장에 특정 은행/상품명이 언급됐으면 그 기관명(rule_store의
+    # demo_rules.json institution 필드와 정확히 같은 문자열)을 담는다. AI가 자유롭게
+    # 추출한 값이 아니라 action_interpreter._detect_institution()이 "실제로 등록된
+    # 기관 목록"과 대조해서 채운 값이다 — 없는 은행 이름을 지어내지 않는다.
+    institution: Optional[str] = None
+    # 은행명만으로는 상품을 특정할 수 없다(한 은행이 여러 상품을 취급하거나, 같은
+    # 상품을 여러 은행이 취급할 수 있음) — 그래서 상품명도 institution과 똑같은
+    # 방식(_detect_product(), 실제 등록된 product 목록과 대조)으로 독립적으로 채운다.
+    product: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

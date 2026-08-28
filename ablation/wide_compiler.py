@@ -48,7 +48,7 @@ sys.path.insert(0, os.path.join(ROOT, "ablation"))
 import ai_rule  # noqa: E402  (google.genai 호출·캐시·환각 게이트 재사용)
 from blind25_fixed import ExtendedRuleSchema, EvidenceGate  # noqa: E402
 
-PROMPT_VERSION = "wide_compiler_v1_2026-08-25"
+PROMPT_VERSION = "wide_compiler_v2_teamfrozen_2026-08-25_integrated_2026-08-28"
 
 # ── Gemini 구조화 출력 스키마 (ExtendedRuleSchema 14필드와 1:1 대응) ──────────
 # 전부 문자열로 받는다. StrongRegexBaseline과 형식을 맞춰야 두 System을 같은
@@ -84,35 +84,47 @@ _WIDE_SCHEMA = {
     },
 }
 
-_WIDE_PROMPT = """당신은 한국 금융상품 약관 문장을 기계가 읽을 수 있는 규칙으로
-구조화하는 컴파일러입니다. 최종 금액 계산이나 PASS/REVIEW/HOLD 판정은 하지
-않습니다 — 오직 아래 14개 필드로 구조화만 합니다.
+# 2026-08-28: 박승렬 확인 회신으로 팀이 2026-08-25에 실제로 Freeze한 System B 프롬프트
+# 원문을 받았다 — 아래 _TEAM_FROZEN_SYSTEM_PROMPT가 그 원문 그대로다(한 글자도 안 고침).
+# 이 세션이 팀 파일을 못 받아서 임시로 새로 짰던 예전 프롬프트는 이제 이 원문으로
+# 교체한다. 원문은 "행동 규칙 5개"만 정의하고 14개 필드 이름 자체는 나열하지 않는데
+# (response_schema가 필드명/타입을 강제하므로 원래 설계상 필요 없음), 실제로 우리가
+# 쓰는 파이프라인은 스키마와 별개로 "이 필드에 뭘 채워야 하는지" 설명도 프롬프트 안에
+# 있어야 모델이 제대로 채운다 — 그래서 원문 뒤에 필드 설명(_FIELD_GUIDE)을 그대로 이어
+# 붙인다. 필드 설명 문구는 원문이 아니라 이 세션이 추가한 보충 설명이라는 걸 명확히
+# 구분해서 남겨둔다.
+_TEAM_FROZEN_SYSTEM_PROMPT = """[SYSTEM PROMPT - FIXED]
+You are a precise Financial Contract Logic Extractor. Extract all rules into the provided JSON schema.
 
+Rules:
+1. Extract ALL tier ranges into the `tiers` array. Do NOT pick only the first number.
+2. Normalize compound logic into `nested_or_conditions` when multiple OR conditions exist.
+3. Map exceptions (e.g., "단, ~ 제외") explicitly to `exception`.
+4. Capture precise numeric values including units (%p, 원, 개월) into `effect_value`, `window`, and `cap_or_rate_floor`.
+5. Strictly adhere to the output JSON format without hallucinating facts outside the source text."""
+
+# 원문(위)이 언급하지 않는 나머지 필드(rule_id/target_event/condition/effect/
+# attribution_rule/grace_period/recalc_frequency/reversible_or_retroactive_restore)에
+# 대한 설명 — 팀 프롬프트 원문이 아니라 이 세션이 보충한 부분.
+_FIELD_GUIDE = """
+Field guide (스키마 14필드 중 위 5개 규칙이 직접 언급하지 않는 필드에 대한 보충 설명 —
+이 부분은 팀 원문이 아니라 이 세션이 스키마와 맞추기 위해 추가함):
 rule_id             이 규칙을 식별할 짧은 이름 (없으면 비움)
 target_event        이 조항이 적용되는 행동/이벤트 (예: 카드 이용실적)
 condition           적용 조건 서술 (예: "최근 3개월 60만원 이상 이용")
 effect              조건 충족 시 효과 서술
-nested_or_conditions 조건들 사이의 OR/대체 관계가 있으면 그 목록. 없으면 빈 배열
-tiers               계단형 다중 구간이면 각 구간을 {threshold, effect_value}로.
-                    단일 구간이면 빈 배열로 두고 effect_value만 채운다.
-window              측정 기간. 원문 표기 그대로 (예: "최근 3개월", "12개월간")
-effect_value        단일 구간일 때의 우대폭/효과. 원문 표기 그대로 (예: "0.20%", "0.2%p")
-exception           예외/제외 조항. 원문 표현 그대로. 없으면 비움
 attribution_rule    실적 인정을 위한 귀속조건. 원문 표현 그대로. 없으면 비움
 grace_period        유예 기간이 명시되어 있으면 그대로. 없으면 비움
-recalc_frequency    재산정 주기가 명시되어 있으면 그대로. 없으면 비움
-cap_or_rate_floor   한도(cap) 또는 최저금리(floor)가 명시되어 있으면 그대로. 없으면 비움
 reversible_or_retroactive_restore  복구/소급 적용 관련 서술이 있으면 그대로. 없으면 비움
 
-**절대 규칙**
-1. 원문에 없는 숫자·조건을 지어내지 마세요. 확실하지 않으면 그 필드를 비우세요(빈 문자열/빈 배열).
-2. 숫자를 담는 필드(threshold, effect_value, window, cap_or_rate_floor)는 원문에 쓰인
-   표기를 그대로 옮기세요. 단위를 임의로 바꾸거나(예: "60만원"→"600000") 반올림하지 마세요.
-3. tiers를 채웠으면 effect_value(단일값)는 비워두세요. 같은 정보를 두 번 넣지 마세요.
+tiers를 채웠으면 effect_value(단일값)는 비워두세요 — 같은 정보를 두 번 넣지 않습니다.
+숫자를 담는 필드는 원문에 쓰인 표기를 그대로 옮기세요(단위를 임의로 바꾸거나 반올림하지 않음).
 
 [조항 원문]
 {clause}
 """
+
+_WIDE_PROMPT = _TEAM_FROZEN_SYSTEM_PROMPT + "\n" + _FIELD_GUIDE
 
 
 def _prompt_hash() -> str:

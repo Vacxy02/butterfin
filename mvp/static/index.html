@@ -22,9 +22,14 @@
     font-size:14px; font-weight:600; cursor:pointer; }
   button.secondary { background:var(--surface); color:var(--ink); border:1px solid var(--line); }
   .badge { display:inline-block; padding:5px 14px; border-radius:100px; font-weight:700; font-size:14px; }
-  .badge.PASS { background:var(--good-sf); color:var(--accent); }
-  .badge.REVIEW { background:var(--warn-sf); color:var(--warn); }
-  .badge.HOLD, .badge.EXECUTION_BLOCKED { background:var(--crit-sf); color:var(--crit); }
+  .badge.PASS, .badge.SAFE { background:var(--good-sf); color:var(--accent); }
+  .badge.REVIEW, .badge.WARNING { background:var(--warn-sf); color:var(--warn); }
+  .badge.HOLD, .badge.EXECUTION_BLOCKED, .badge.BREACH { background:var(--crit-sf); color:var(--crit); }
+  .badge.NOT_APPLICABLE { background:var(--bg); color:var(--ink-2); }
+  .subhead { font-size:12px; font-weight:700; color:var(--ink-2); text-transform:uppercase;
+    letter-spacing:.06em; margin:18px 0 8px; }
+  .subhead:first-child { margin-top:0; }
+  .note { font-size:12px; color:var(--ink-2); margin-top:6px; }
   .stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-top:14px; }
   .stat { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
   .stat .l { font-size:11px; color:var(--ink-2); text-transform:uppercase; letter-spacing:.05em; }
@@ -57,6 +62,16 @@
       <option value="PAYMENT_ACCOUNT_CHANGE">PAYMENT_ACCOUNT_CHANGE (결제계좌 변경)</option>
       <option value="SALARY_ACCOUNT_CHANGE">SALARY_ACCOUNT_CHANGE (급여계좌 변경)</option>
     </select>
+    <label>은행/기관 (선택 — 은행명만으로는 상품이 안 좁혀질 수 있어 아래 상품명과
+      별개로 관리됩니다. 비워두면 해당 행동 유형의 모든 등록 은행을 대상으로 판정)</label>
+    <select id="institution">
+      <option value="">전체 (자동)</option>
+    </select>
+    <label>상품명 (선택 — 같은 은행이 여러 상품을 취급하거나 같은 상품을 여러 은행이
+      취급할 수 있어 은행명과 독립적으로 좁힙니다)</label>
+    <select id="product">
+      <option value="">전체 (자동)</option>
+    </select>
     <label>월 이동 금액 (원, CARD_SPEND_SHIFT일 때만)</label>
     <input id="amount" type="number" value="30000">
     <label>이 행동으로 즉시 얻는 이득 (원/월, 선택 — 예: 옮기는 카드의 캐시백. CARD_SPEND_SHIFT일 때만, Action Reversal 판정에 씀)</label>
@@ -68,7 +83,7 @@
   <div class="card" id="resultCard" style="display:none;">
     <div id="decisionBadge"></div>
     <div class="reason" id="reasonText"></div>
-    <div class="stat-grid" id="statGrid"></div>
+    <div id="statGrid"></div>
     <div class="evidence" id="evidenceText"></div>
   </div>
 </div>
@@ -79,6 +94,21 @@ async function loadSnapshot() {
   const el = document.getElementById('snapshot');
   if (r) {
     el.textContent = `검증 스냅샷 기준일: ${r.verified_at || '?'} · 규칙 ${r.rules_loaded}개 로딩 · 상태: ${r.status === 'ok' ? '정상' : '점검 필요'}`;
+    // 은행/상품 드롭다운을 서버가 실제로 로딩한 institution/product 목록으로 채운다 —
+    // demo_rules.json에 있는 이름만 옵션으로 나오게 해서(하드코딩 안 함) 프론트와
+    // 데이터가 어긋나지 않게 한다. 둘은 독립적인 축이라 각자 따로 채운다.
+    const fillOptions = (selectId, values) => {
+      if (!Array.isArray(values)) return;
+      const sel = document.getElementById(selectId);
+      for (const v of values) {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v;
+        sel.appendChild(opt);
+      }
+    };
+    fillOptions('institution', r.institutions);
+    fillOptions('product', r.products);
   } else {
     el.textContent = '서버 상태를 확인할 수 없습니다.';
   }
@@ -96,22 +126,64 @@ document.getElementById('interpretBtn').onclick = async () => {
     // 내부 예외 메시지(d.reason)는 화면에 노출하지 않는다 — action_type이나
     // clarifying_question처럼 사람이 읽을 수 있게 준비된 문구만 보여준다.
     const shown = d.action_type || d.clarifying_question || (d.status === 'UNSUPPORTED' ? '지원하지 않는 행동 유형입니다.' : '');
-    box.innerHTML = `<div class="interpret-box ${d.status}"><b>${d.status}</b> — ${shown}${d.amount_monthly ? ' · ' + d.amount_monthly.toLocaleString() + '원' : ''}</div>`;
-    if (d.status === 'OK') {
+    const foundBits = [d.institution, d.product].filter(Boolean).join(' · ');
+    box.innerHTML = `<div class="interpret-box ${d.status}"><b>${d.status}</b> — ${shown}${d.amount_monthly ? ' · ' + d.amount_monthly.toLocaleString() + '원' : ''}${foundBits ? ' · [' + foundBits + '] 인식됨' : ''}</div>`;
+    if (d.status === 'OK' || d.status === 'NEED_INFO') {
       if (d.action_type) document.getElementById('actionType').value = d.action_type;
       if (d.amount_monthly) document.getElementById('amount').value = d.amount_monthly;
+      // 문장에 등록된 은행명/상품명이 언급됐으면(예: "신협 카드로 옮길 거야", "디딤돌대출
+      // 해지하려고") 두 드롭다운을 각각 독립적으로 자동 선택한다 — 은행명만으로는
+      // 상품이 안 좁혀질 수 있어서 하나가 다른 하나를 대신하지 않는다. 옵션에 없는
+      // 값이면(서버가 모르는 이름) 그냥 둔다.
+      const autoSelect = (selectId, value) => {
+        const sel = document.getElementById(selectId);
+        if (value && Array.from(sel.options).some(o => o.value === value)) {
+          sel.value = value;
+        }
+      };
+      autoSelect('institution', d.institution);
+      autoSelect('product', d.product);
     }
   } catch (e) {
     box.innerHTML = `<div class="interpret-box ERROR">해석 요청 중 문제가 발생했습니다. 아래 2번 항목에서 직접 입력해 주세요.</div>`;
   }
 };
 
-function wonOrDash(v) {
-  return (v === null || v === undefined) ? '—' : (v >= 0 ? '+' : '') + v.toLocaleString() + '원';
+// ---- 표시 헬퍼: 값이 없으면(null/undefined) 절대 "0원"으로 보이지 않게 한다.
+// engine API가 계산을 안 한 것(unknown)과 0으로 계산된 것(known-zero)을 구분해서
+// 넘겨주므로, 프론트는 그 판단을 다시 하지 않고 그대로 옮겨 적기만 한다.
+function fmtWon(v) {
+  return (v === null || v === undefined) ? '확인 필요' : (v >= 0 ? '+' : '') + Math.round(v).toLocaleString() + '원';
 }
+function fmtWonPlain(v) {
+  return (v === null || v === undefined) ? '확인 필요' : Math.round(v).toLocaleString() + '원';
+}
+function fmtMonth(v) {
+  return (v === null || v === undefined) ? '없음' : v + '개월 뒤';
+}
+function statCard(l, v) {
+  return `<div class="stat"><div class="l">${l}</div><div class="v">${v}</div></div>`;
+}
+function fmtRange(min, max) {
+  if (min === null && max === null) return '계산에 필요한 정보 부족';
+  return `${fmtWonPlain(min)} ~ ${fmtWonPlain(max)}`;
+}
+
+const ROBUST_STATUS_LABEL = {
+  CALCULATED: '계산됨 (확인된 불확실성 범위 기준)',
+  NOT_APPLICABLE: '해당 없음 — 확인된 불확실성 데이터가 없어 계산 안 함 (임의 버퍼 미적용)',
+  EMPTY_SAFE_ZONE: '안전구간 없음 — 최악의 경우 즉시 위반 가능',
+};
+const CLIFF_STATUS_LABEL = {
+  CALCULATED: '계산됨',
+  NOT_APPLICABLE: '해당 없음 (실제 불연속 지점 없음)',
+  UNKNOWN: '계산에 필요한 정보 부족 (연계 잔액 등 미입력)',
+};
 
 document.getElementById('evaluateBtn').onclick = async () => {
   const action_type = document.getElementById('actionType').value;
+  const institution = document.getElementById('institution').value || undefined;
+  const product = document.getElementById('product').value || undefined;
   const amount_monthly = Number(document.getElementById('amount').value);
   const direct_benefit_monthly = Number(document.getElementById('directBenefit').value) || 0;
   const exception_condition_met = document.getElementById('exceptionMet').checked;
@@ -119,7 +191,7 @@ document.getElementById('evaluateBtn').onclick = async () => {
   let data;
   try {
     const res = await fetch('/api/evaluate', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({action_type, amount_monthly, direct_benefit_monthly, exception_condition_met})});
+      body: JSON.stringify({action_type, institution, product, amount_monthly, direct_benefit_monthly, exception_condition_met})});
     if (!res.ok) throw new Error('server_error');
     data = await res.json();
   } catch (e) {
@@ -137,29 +209,101 @@ document.getElementById('evaluateBtn').onclick = async () => {
   document.getElementById('decisionBadge').innerHTML = `<span class="badge ${data.decision}">${data.decision}</span>`;
   document.getElementById('reasonText').textContent = data.reason || '판정 사유를 확인할 수 없습니다.';
 
-  const stats = [];
-  if (data.ttb_months !== undefined) stats.push(['Time-to-Breach (TTB)', data.ttb_months !== null ? data.ttb_months + '개월 뒤' : '없음']);
-  if (data.ttr_months !== undefined) stats.push(['Time-to-Reversal (TTR)', data.ttr_months !== null ? data.ttr_months + '개월 뒤' : '없음']);
-  if (data.safe_limit_won !== undefined) stats.push(['Contract-Safe Limit', data.safe_limit_won.toLocaleString() + '원/월']);
-  if (data.dlg) {
-    stats.push([`직접효과 D (${data.dlg.as_of_month}개월 시점)`, wonOrDash(data.dlg.direct_won)]);
-    stats.push([`연쇄효과 L (${data.dlg.as_of_month}개월 시점)`, wonOrDash(data.dlg.linked_won)]);
-    stats.push([`전체효과 G = D+L (${data.dlg.as_of_month}개월 시점)`, wonOrDash(data.dlg.total_won)]);
-  } else if (data.dlg === null && 'action_reversal' in data) {
-    stats.push(['D/L/G (실제 원 금액)', '이 유형은 금액 모델 미지원 (%p 우대만 판정)']);
-  }
-  if ('action_reversal' in data) stats.push(['Action Reversal 발생 여부', data.action_reversal ? '예 — 당장은 이득이나 전체 손익은 손실' : '아니오']);
-  if (data.matched_rules) stats.push(['매칭 규칙', data.matched_rules.join(', ') || '없음']);
-  document.getElementById('statGrid').innerHTML = stats.map(([l,v]) =>
-    `<div class="stat"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
+  // 06_MVP_표시명세.md 순서를 그대로 따른다. 프론트는 여기서 아무 것도 다시
+  // 계산하지 않는다 — engine API(app.py /api/evaluate)가 이미 계산해 돌려준
+  // safety/effects/time/evidence 값을 순서대로 옮겨 적을 뿐이다.
+  const safety = data.safety || {};
+  const effects = data.effects || {};
+  const time = data.time || {};
+  const isDiscreteType = safety.current_zone === 'NOT_APPLICABLE' && (data.action ? data.action.amount === null : true);
 
+  let html = '';
+
+  // 2. 현재 계획 행동량
+  html += `<div class="subhead">2. 현재 계획 행동량</div><div class="stat-grid">`;
+  html += statCard('행동 유형', (data.action && data.action.type) || '확인 필요');
+  html += statCard('계획 금액', (data.action && data.action.amount !== null && data.action.amount !== undefined)
+    ? data.action.amount.toLocaleString() + '원/월'
+    : '해당 없음 (금액 기반 유형이 아님)');
+  html += `</div>`;
+
+  if (isDiscreteType) {
+    html += `<div class="note">이 행동 유형(해지/계좌변경 등)은 1차원 연속 금액 모델을 쓰지 않아 Safe Zone/Financial Cliff 개념이 적용되지 않습니다 — 아래 3~8번은 모두 해당 없음으로 표시됩니다.</div>`;
+  }
+
+  // 3. Robust Safe Zone
+  html += `<div class="subhead">3. Robust Safe Zone</div><div class="stat-grid">`;
+  html += statCard('범위', fmtRange(safety.robust_safe_zone ? safety.robust_safe_zone.min : null, safety.robust_safe_zone ? safety.robust_safe_zone.max : null));
+  html += statCard('상태', ROBUST_STATUS_LABEL[safety.robust_status] || safety.robust_status || '확인 필요');
+  html += `</div>`;
+
+  // 4. Warning Zone
+  html += `<div class="subhead">4. Warning Zone</div><div class="stat-grid">`;
+  const wz = safety.warning_zone || {};
+  html += statCard('범위 (초과 ~ 이하)', fmtRange(wz.min_exclusive, wz.max_inclusive));
+  html += `</div>`;
+
+  // 5. Nominal Safe Limit
+  html += `<div class="subhead">5. Nominal Safe Limit</div><div class="stat-grid">`;
+  html += statCard('한도', safety.nominal_safe_limit !== null && safety.nominal_safe_limit !== undefined ? fmtWonPlain(safety.nominal_safe_limit) + '/월' : '확인 필요');
+  html += `</div>`;
+
+  // 6. 현재 행동 위치
+  html += `<div class="subhead">6. 현재 행동 위치</div><div class="stat-grid">`;
+  html += statCard('구간', `<span class="badge ${safety.current_zone}">${safety.current_zone || '확인 필요'}</span>`);
+  html += `</div>`;
+
+  // 7. Binding Constraint
+  html += `<div class="subhead">7. Binding Constraint</div><div class="stat-grid">`;
+  html += statCard('가장 엄격한 계약(동률 포함)', (safety.binding_constraints && safety.binding_constraints.length) ? safety.binding_constraints.join(', ') : '확인 필요');
+  html += `</div>`;
+
+  // 8. Financial Cliff
+  html += `<div class="subhead">8. Financial Cliff</div><div class="stat-grid">`;
+  html += statCard('불연속 크기 (경계 넘을 때 손익 점프)', (safety.financial_cliff !== null && safety.financial_cliff !== undefined) ? fmtWon(safety.financial_cliff) : (CLIFF_STATUS_LABEL[safety.cliff_status] || '확인 필요'));
+  html += statCard('상태', CLIFF_STATUS_LABEL[safety.cliff_status] || safety.cliff_status || '확인 필요');
+  html += `</div>`;
+
+  // 9. D / L / G
+  html += `<div class="subhead">9. 경제적 효과 (D / L / G)</div><div class="stat-grid">`;
+  if (effects.D !== null && effects.D !== undefined) {
+    html += statCard('직접효과 D', fmtWon(effects.D));
+    html += statCard('연쇄효과 L', fmtWon(effects.L));
+    html += statCard('전체효과 G = D + L', fmtWon(effects.G));
+  } else {
+    html += statCard('D / L / G', '이 유형은 금액 모델 미지원 (%p 우대만 판정)');
+  }
+  html += `</div>`;
+
+  // 10. Action Reversal
+  html += `<div class="subhead">10. Action Reversal</div><div class="stat-grid">`;
+  html += statCard('발생 여부', effects.reversal ? '예 — 당장은 이득이나 전체 손익은 손실' : '아니오');
+  html += `</div>`;
+
+  // 11. TTB / TTR
+  html += `<div class="subhead">11. Time-to-Breach / Time-to-Reversal</div><div class="stat-grid">`;
+  html += statCard('TTB (구간 이탈 시점)', fmtMonth(time.TTB));
+  html += statCard('TTR (실제 위반 시점)', fmtMonth(time.TTR));
+  html += `</div>`;
+
+  if (data.matched_rules) {
+    html += `<div class="note">매칭 규칙: ${data.matched_rules.join(', ') || '없음'}</div>`;
+  }
+
+  document.getElementById('statGrid').innerHTML = html;
+
+  // 12. 공식 Evidence — 여러 계약이 매칭될 수 있으므로 배열로 온다.
   const ev = document.getElementById('evidenceText');
-  if (data.evidence && data.evidence.source_url) {
-    const url = data.evidence.source_url;
-    const safeUrl = /^https?:\/\//i.test(url) ? url : null;
-    ev.innerHTML = safeUrl
-      ? `근거: <a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a> (검증일 ${data.evidence.verified_at || '?'})`
-      : `근거: ${url} (검증일 ${data.evidence.verified_at || '?'})`;
+  const evList = Array.isArray(data.evidence) ? data.evidence : (data.evidence ? [data.evidence] : []);
+  if (evList.length) {
+    ev.innerHTML = '<div class="subhead" style="margin-top:0;">12. 공식 Evidence</div>' + evList.map(e => {
+      const url = e.source_url;
+      const safeUrl = url && /^https?:\/\//i.test(url) ? url : null;
+      const link = safeUrl
+        ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>`
+        : (url || '확인 필요');
+      return `<div>· [${e.rule_id || '?'}] ${link} (검증일 ${e.verified_at || '?'})</div>`;
+    }).join('');
   } else {
     ev.innerHTML = '';
   }

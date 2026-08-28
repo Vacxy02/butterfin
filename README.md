@@ -46,6 +46,8 @@ ablation/
   scoring_contract.md      # 채점 필드 정의만 (Gold 없음)
 tests/                   # 95개 단위 테스트 (전부 통과)
 FREEZE_PREP.md            # Freeze 대상 파일들의 현재 버전/SHA256 기록 (Freeze 선언 아님, 준비만)
+action_reversal_rule_ledger_v3.csv  # 박승렬 제공, 37행 원장 원본 (2026-08-28 확보)
+evidence_bundle_20260821.csv        # 박승렬 제공, 원장 보조 근거(evidence_span/locator) CSV
 Dockerfile, render.yaml, fly.toml, requirements.txt, .env.example, .gitignore
 ```
 
@@ -122,6 +124,11 @@ DEV25 B 25건 공식 실행 → C 실행(Gemini 재호출 0회, 이미 구조는
 sanity rerun → Freeze 준비 완료 보고. **Freeze 전에는 FINAL_UNSEEN 문제/Gold를 보지
 않습니다.**
 
+**2026-08-28 박승렬 회신 후 진행 상황:** 프롬프트 원본 반영, 37행 원장 대조,
+Evidence URL 실링크 반영 — 3건 다 완료(`FREEZE_PREP.md` 1~2절 참고). **Scoring 코드는
+아직 미착수** — `Claude_적대적감사_결과_2026-08-28.md`(BLOCKER 4가지가 적힌 감사
+문서)를 받아야 정확히 구현할 수 있어서, 이 파일을 박승렬에게 요청해야 합니다.
+
 ## 지금부터 실제로 해야 할 일 (우선순위 순)
 
 이 세션이 대신 할 수 없는 것들만 남았습니다.
@@ -135,12 +142,11 @@ sanity rerun → Freeze 준비 완료 보고. **Freeze 전에는 FINAL_UNSEEN �
 2. **`GEMINI_API_KEY` 발급 → 로컬에서 실제 Gemini 응답 확인.** 지금까지 이 환경엔 키가
    없어서 action_interpreter는 mock, DEV25 System B/C는 전부 accepted=N(정직한 실패)
    상태입니다.
-3. **`wide_compiler.py`의 프롬프트가 팀이 실제로 쓰던 System B/C 프롬프트와 같은지
-   확인.** 팀 실제 파일 3개(`ai_rule.py`/`baseline_regex.py`/`blind25_fixed.py`)에는
-   System A와 Gate만 있고 System B/C 컴파일러가 없어서, 이 세션에서 스키마
-   (`ExtendedRuleSchema`)와 Gate는 그대로 두고 프롬프트만 새로 썼습니다. 박승렬님께
-   원래 프롬프트가 따로 있었는지 확인해서, 있으면 그걸로 교체해야 진짜 DEV25 실험
-   조건이 됩니다.
+3. **(2026-08-28 해결됨) `wide_compiler.py` 프롬프트를 팀 원본으로 교체 완료.**
+   박승렬 회신으로 2026-08-25에 팀이 실제로 Freeze한 System B 프롬프트 원문을
+   받아서 `wide_compiler._TEAM_FROZEN_SYSTEM_PROMPT`에 그대로(한 글자도 안 고침)
+   반영했습니다. 원문이 14개 필드 이름까지는 나열하지 않아서, 필드별 의미 설명은
+   이 세션이 `_FIELD_GUIDE`로 보충했고 코드에서 원문과 명확히 구분해뒀습니다.
 4. **진짜 `GEMINI_API_KEY`로 DEV25 재실행 → Freeze.** Freeze 시 기록할 것: 위 세 실제
    코드 파일의 SHA-256, `wide_compiler.PROMPT_VERSION`, Gemini model/설정.
 5. **Render 또는 Fly.io에 배포 → `verify_deploy.py`로 실측.**
@@ -162,20 +168,22 @@ sanity rerun → Freeze 준비 완료 보고. **Freeze 전에는 FINAL_UNSEEN �
   TTR 확인되면(몇 개월 뒤든) HOLD, TTB만 있고 TTR 없으면 REVIEW. 팀의 실제 구현이 있다면
   대조해서 `engine.py`만 고치면 됩니다.
 - **NPV/할인율 계산이 없습니다.**
-- **배포된 규칙 8개는 "최신 37행 원장"(`action_reversal_rule_ledger_v3.csv`)이 아니라
-  별도 문서(`공모전_Evidence Bundle.docx`, 2026-08-25 팀 최신본)에서 온 것입니다** —
-  `mvp/demo_rules.json`의 `_meta.source`에 그렇게 적혀 있습니다. 37행 원장 CSV 자체는
-  이 세션/이 build 어디에도 없어서 두 소스를 직접 대조하지 못했습니다. 즉 "이 8개가
-  37행 원장의 부분집합인지, 원장과 별개로 새로 검수된 규칙인지"는 확인이 안 된 상태이며,
-  지어내지 않았습니다. 37행 원장 CSV를 구하면 `rule_id`/조항 텍스트 기준으로 대조해
-  일치 여부를 확정할 수 있습니다.
-- **Evidence 링크는 실제 URL이 있을 때만 클릭됩니다.** `mvp/static/index.html`은 이제
-  `evidence.source_url`이 `http(s)://`로 시작하면 클릭 가능한 링크로 렌더링하지만,
-  현재 `mvp/demo_rules.json`의 `source_url` 값 8개 중 대부분은 실제 URL이 아니라
-  "OO은행 상품페이지 > 우대금리" 같은 설명 텍스트입니다(`ablation/blind25_samples.json`의
-  일부 항목만 진짜 URL을 갖고 있음). 없는 URL을 지어내지 않았으므로, 이 값들은 화면에
-  텍스트로만 표시됩니다 — 실제로 클릭 가능하게 하려면 각 규칙의 `source_url`을 진짜
-  `https://` 링크로 채워야 합니다.
+- **(2026-08-28 해결됨) 배포 규칙 8개 ↔ 37행 원장 대조 완료, 값 불일치 3건도 전부 재확인 완료.**
+  박승렬이 원장 CSV(`action_reversal_rule_ledger_v3.csv`, 37행)와 보조 근거 CSV
+  (`evidence_bundle_20260821.csv`)를 보내와서 대조했습니다. **8개 전부 원장
+  `rule_id`로 추적됩니다** — `mvp/demo_rules.json`의 각 규칙에 `ledger_rule_ids`
+  필드로 매핑을 남겼습니다(예: `KB_CARD_LOAN_STEP` 하나 = 원장의 `_T1/_T2/_T3` 3행).
+  최초 대조에서 3건(`HANA_HISTORY_SAVINGS.effect_pct_p=4.70`,
+  `SHINHYUP_CARD_USAGE`의 4~7회 구간, `HF_SUBSCRIPTION_DIDIMDOL` 신혼부부 금리하한
+  1.2%)이 원장/근거 CSV에 안 보여서 `unverified_against_ledger`로 표시했는데, 같은
+  날 공식 페이지/원본 PDF를 직접 재조회해 **세 값 전부 사실로 확인**됐습니다 — 원장
+  자체가 해당 3개 행을 아직 안 만들었을 뿐 값은 처음부터 맞았습니다. 각 규칙의
+  `ledger_reconfirmed_2026-08-28` 필드에 근거 원문을 남겼습니다. 자세한 내용은
+  `FREEZE_PREP.md` 1절 참고.
+- **(2026-08-28 해결됨) Evidence 링크가 실제 URL로 채워졌습니다.** 원장 CSV의
+  `source_url` 열에 37/37 전부 실제 `https://` 링크가 있어서, `mvp/demo_rules.json`
+  8개 규칙의 `source_url`을 전부 그 값으로 교체했습니다. `mvp/static/index.html`이
+  `http(s)://`로 시작하는 URL을 클릭 가능한 링크로 렌더링하므로 이제 실제로 클릭됩니다.
 - **Action Reversal 여부는 `direct_benefit_monthly`(이 행동으로 즉시 얻는 이득, 예:
   카드 캐시백) 입력값에 좌우됩니다.** `Reversal := D_T>0 and G_T<0`이라는 팀의 엄격한
   정의상, 이 값을 0으로 두면(입력 안 하면) D=0이라 조건을 만족하지 못해 손실이 있어도

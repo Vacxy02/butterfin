@@ -197,3 +197,210 @@ def decide(*, freshness_ok: bool, inputs_sufficient: bool, rule_matched: bool,
         return {"decision": "REVIEW",
                 "reason": f"{sim.ttb}개월 뒤 우대구간 자체가 바뀝니다. 전체 손익은 아직 마이너스가 아니지만 조건 변화가 예상되어 확인이 필요합니다."}
     return {"decision": "PASS", "reason": f"{12}개월 시뮬레이션 동안 보호조건 위반이 관측되지 않았습니다."}
+
+
+# ============================================================================
+# 수학 v1.2 — Safe Zone 확장
+# (2026-08-28, 박승렬 "02_수학_v1.2_엔진명세.md"/"03_1차원_구간판정_규칙.md" 기준)
+#
+# 기존 함수(SimResult/simulate/build_rolling_series/tier_lookup/safe_limit/decide 등)는
+# 한 글자도 안 고쳤다 — 전부 추가만 했다. 적용 범위: tiers/thresholds가 있는 1차원
+# 연속 행동(CARD_SPEND_SHIFT류)만. PRODUCT_TERMINATION 같은 이산 판정에는 이 Safe
+# Zone 개념 자체가 적용되지 않는다(명세에 그런 정의가 없음).
+#
+# 원칙(명세 §11 "출력 철학" 그대로): 원문/상태에 없는 D, 임의의 uncertainty, 임의의
+# safe buffer, 근거 없는 최적구간 — 이 넷은 절대 지어내지 않는다. 모르면 unknown /
+# NOT_APPLICABLE / REVIEW로 명확히 남긴다.
+# ============================================================================
+
+ENGINE_VERSION = "engine_v1.2_safezone_2026-08-28"
+
+ZONES = ["SAFE", "WARNING", "BREACH", "REVIEW"]
+
+# Optimal Safe Range의 epsilon(명세 §9: "코드에 숨겨 하드코딩하지 말고 설정/명세에
+# 명시"). 통화 최소단위(step)의 배수로 정의한다 — 이 폭 안의 G값은 "사실상 동급의
+# 최적"으로 취급한다는 뜻. 호출자가 optimal_range_epsilon으로 직접 덮어쓸 수 있다.
+DEFAULT_OPTIMAL_RANGE_EPSILON_STEPS = 10
+
+
+@dataclass
+class ConstraintLimit:
+    """계약(규칙) 하나의 nominal 안전한도."""
+    rule_id: str
+    nominal_limit: int
+
+
+@dataclass
+class SafeZoneResult:
+    nominal_safe_limit: Optional[int]
+    robust_safe_limit: Optional[int]
+    robust_status: str                       # CALCULATED | NOT_APPLICABLE | EMPTY_SAFE_ZONE
+    robust_safe_zone: Dict[str, Optional[int]]
+    warning_zone: Dict[str, Optional[int]]
+    binding_constraints: List[str]
+    current_zone: str                        # SAFE | WARNING | BREACH | REVIEW
+    financial_cliff: Optional[float]
+    cliff_status: str                        # CALCULATED | NOT_APPLICABLE | UNKNOWN
+    optimal_safe_range: Optional[Dict[str, Optional[int]]]
+    optimal_status: str                      # CALCULATED | UNKNOWN_EFFECT | NOT_APPLICABLE
+
+
+def _per_rule_nominal_limit(*, hist3: List[float], baseline_monthly: float,
+                             thresholds: List[Dict[str, Any]], horizon: int = 12, step: int = 1000) -> int:
+    """단일 계약(규칙)의 nominal safe limit. 기존 safe_limit()을 그대로 재사용한다 —
+    새 계산 경로가 아니라 같은 로직에 이름만 하나 더 붙인 것."""
+    return safe_limit(hist3=hist3, baseline_monthly=baseline_monthly, thresholds=thresholds,
+                       horizon=horizon, step=step)
+
+
+def _empty_safe_zone_result(zone: str = "REVIEW") -> SafeZoneResult:
+    return SafeZoneResult(
+        nominal_safe_limit=None, robust_safe_limit=None, robust_status="NOT_APPLICABLE",
+        robust_safe_zone={"min": None, "max": None},
+        warning_zone={"min_exclusive": None, "max_inclusive": None},
+        binding_constraints=[], current_zone=zone,
+        financial_cliff=None, cliff_status="NOT_APPLICABLE",
+        optimal_safe_range=None, optimal_status="NOT_APPLICABLE",
+    )
+
+
+def compute_safe_zone(
+    *,
+    hist3: List[float],
+    baseline_monthly: float,
+    rules: List[Dict[str, Any]],
+    planned_x: Optional[float],
+    horizon: int = 12,
+    step: int = 1000,
+    uncertainty_scenarios: Optional[List[Dict[str, Any]]] = None,
+    linked_balance: Optional[float] = None,
+    direct_benefit_monthly: Optional[float] = None,
+    optimal_range_epsilon: Optional[float] = None,
+) -> SafeZoneResult:
+    """
+    rules: 매칭된 계약(규칙) 전부 — 각 원소는 {"rule_id": str, "thresholds": [{"min":...,
+    "effect_pct_p":...}, ...]}. 계약이 여러 개면 nominal_safe_limit은 그중 가장 엄격한
+    (가장 작은) 값이고, binding_constraints는 그 값을 만든 계약 rule_id 전부다(동률
+    포함 — 하나만 고르지 않는다, 명세 §7).
+
+    uncertainty_scenarios: **실제로 확인된** 상태 불확실성이 있을 때만 넘긴다 — 예:
+    hist3/baseline_monthly가 "이럴 수도 있다"는 대안 시나리오 목록(각 원소는 hist3/
+    baseline_monthly를 override하는 dict). None(기본값)이면 이 배포에는 확인된
+    불확실성 정보가 없다는 뜻이므로 robust_status="NOT_APPLICABLE"로 명확히 표시하고
+    robust_safe_limit은 nominal과 같은 값으로 둔다(명세 §5 — 임의 버퍼 생성 금지,
+    "값이 없으면 nominal과 동일" 정책으로 통일). 진짜로 값이 다른 게 아니라 "계산을
+    안 했다"는 뜻이라는 걸 robust_status로 구분한다.
+
+    linked_balance/direct_benefit_monthly: Financial Cliff·Optimal Safe Range 계산에
+    필요한 G(x) 산출 근거. None이면(=D/G를 계산할 근거 없음) 둘 다 억지로 계산하지
+    않고 cliff_status="UNKNOWN", optimal_status="UNKNOWN_EFFECT"로 남긴다(명세 §3, §9).
+    """
+    usable_rules = [r for r in rules if r.get("thresholds")]
+    if not usable_rules:
+        return _empty_safe_zone_result("REVIEW")
+
+    # 1) 계약별 nominal limit → 전체는 최솟값, binding은 동률 전부
+    per_rule = [
+        ConstraintLimit(rule_id=r["rule_id"],
+                         nominal_limit=_per_rule_nominal_limit(hist3=hist3, baseline_monthly=baseline_monthly,
+                                                                thresholds=r["thresholds"], horizon=horizon, step=step))
+        for r in usable_rules
+    ]
+    nominal = min(c.nominal_limit for c in per_rule)
+    binding = [c.rule_id for c in per_rule if c.nominal_limit == nominal]
+
+    # 2) robust — 실제 불확실성 시나리오가 있을 때만 계산한다
+    if uncertainty_scenarios:
+        scenario_limits = []
+        for sc in uncertainty_scenarios:
+            sc_hist3 = sc.get("hist3", hist3)
+            sc_baseline = sc.get("baseline_monthly", baseline_monthly)
+            sc_min = min(
+                _per_rule_nominal_limit(hist3=sc_hist3, baseline_monthly=sc_baseline,
+                                         thresholds=r["thresholds"], horizon=horizon, step=step)
+                for r in usable_rules
+            )
+            scenario_limits.append(sc_min)
+        robust_value = min([nominal] + scenario_limits)
+        robust_status = "EMPTY_SAFE_ZONE" if robust_value <= 0 else "CALCULATED"
+    else:
+        robust_status = "NOT_APPLICABLE"
+        robust_value = nominal
+
+    robust_safe_zone = {"min": 0, "max": robust_value}
+    warning_zone = {"min_exclusive": robust_value, "max_inclusive": nominal}
+
+    # 3) 현재 계획 행동 x의 zone 판정 (03_1차원_구간판정_규칙.md 그대로)
+    if planned_x is None:
+        current_zone = "REVIEW"
+    elif planned_x <= robust_value:
+        current_zone = "SAFE"
+    elif planned_x <= nominal:
+        current_zone = "WARNING"
+    else:
+        current_zone = "BREACH"
+
+    # 4) Financial Cliff — nominal 경계 바로 아래/위(최소단위 1개 차이)에서 12개월
+    #    누적 G의 점프. binding 계약이 여럿이면 그중 첫 번째 계약 기준으로 계산한다
+    #    (여러 계약의 개별 cliff까지 합성하는 건 이번 범위 밖 — 명세에 없음).
+    if linked_balance is None:
+        cliff_status = "UNKNOWN"
+        financial_cliff = None
+    else:
+        search_ceiling = int((baseline_monthly // step + 1) * step)
+        if nominal >= search_ceiling:
+            # holds()가 탐색 상한까지 계속 참 → 이 구간엔 실제 breach 경계(불연속)가 없다
+            cliff_status = "NOT_APPLICABLE"
+            financial_cliff = None
+        else:
+            binding_rule = next(r for r in usable_rules if r["rule_id"] == binding[0])
+            below = max(nominal - step, 0)
+            above = nominal + step
+            db = direct_benefit_monthly or 0.0
+            sim_below = simulate(hist3=hist3, baseline_monthly=baseline_monthly, shift_monthly=below,
+                                  thresholds=binding_rule["thresholds"], linked_balance=linked_balance,
+                                  direct_benefit_monthly=db, horizon=horizon)
+            sim_above = simulate(hist3=hist3, baseline_monthly=baseline_monthly, shift_monthly=above,
+                                  thresholds=binding_rule["thresholds"], linked_balance=linked_balance,
+                                  direct_benefit_monthly=db, horizon=horizon)
+            cliff = sim_above.G[-1] - sim_below.G[-1]
+            if abs(cliff) < 1e-9:
+                cliff_status = "NOT_APPLICABLE"
+                financial_cliff = 0.0
+            else:
+                cliff_status = "CALCULATED"
+                financial_cliff = cliff
+
+    # 5) Optimal Safe Range — 선택 구현(명세 §9). D/G 근거 없으면 UNKNOWN_EFFECT.
+    if linked_balance is None:
+        optimal_status = "UNKNOWN_EFFECT"
+        optimal_safe_range = None
+    elif robust_value <= 0:
+        optimal_status = "NOT_APPLICABLE"
+        optimal_safe_range = None
+    else:
+        binding_rule = next(r for r in usable_rules if r["rule_id"] == binding[0])
+        eps_steps = optimal_range_epsilon if optimal_range_epsilon is not None else DEFAULT_OPTIMAL_RANGE_EPSILON_STEPS
+        epsilon = eps_steps * step
+        db = direct_benefit_monthly or 0.0
+        xs = list(range(0, robust_value + 1, step))
+        if not xs or xs[-1] != robust_value:
+            xs.append(robust_value)
+        g_values = []
+        for x in xs:
+            sim_x = simulate(hist3=hist3, baseline_monthly=baseline_monthly, shift_monthly=x,
+                              thresholds=binding_rule["thresholds"], linked_balance=linked_balance,
+                              direct_benefit_monthly=db, horizon=horizon)
+            g_values.append((x, sim_x.G[-1]))
+        g_star = max(g for _, g in g_values)
+        good_xs = [x for x, g in g_values if g >= g_star - epsilon]
+        optimal_status = "CALCULATED"
+        optimal_safe_range = {"min": min(good_xs), "max": max(good_xs)}
+
+    return SafeZoneResult(
+        nominal_safe_limit=nominal, robust_safe_limit=robust_value, robust_status=robust_status,
+        robust_safe_zone=robust_safe_zone, warning_zone=warning_zone,
+        binding_constraints=binding, current_zone=current_zone,
+        financial_cliff=financial_cliff, cliff_status=cliff_status,
+        optimal_safe_range=optimal_safe_range, optimal_status=optimal_status,
+    )
