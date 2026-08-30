@@ -237,6 +237,7 @@ class SafeZoneResult:
     robust_status: str                       # CALCULATED | NOT_APPLICABLE | EMPTY_SAFE_ZONE
     robust_safe_zone: Dict[str, Optional[int]]
     warning_zone: Dict[str, Optional[int]]
+    warning_status: str                      # CALCULATED | NONE | NOT_APPLICABLE (2026-08-30 FIX-2)
     binding_constraints: List[str]
     current_zone: str                        # SAFE | WARNING | BREACH | REVIEW
     financial_cliff: Optional[float]
@@ -257,7 +258,7 @@ def _empty_safe_zone_result(zone: str = "REVIEW") -> SafeZoneResult:
     return SafeZoneResult(
         nominal_safe_limit=None, robust_safe_limit=None, robust_status="NOT_APPLICABLE",
         robust_safe_zone={"min": None, "max": None},
-        warning_zone={"min_exclusive": None, "max_inclusive": None},
+        warning_zone={"min_exclusive": None, "max_inclusive": None}, warning_status="NOT_APPLICABLE",
         binding_constraints=[], current_zone=zone,
         financial_cliff=None, cliff_status="NOT_APPLICABLE",
         optimal_safe_range=None, optimal_status="NOT_APPLICABLE",
@@ -328,7 +329,17 @@ def compute_safe_zone(
         robust_value = nominal
 
     robust_safe_zone = {"min": 0, "max": robust_value}
-    warning_zone = {"min_exclusive": robust_value, "max_inclusive": nominal}
+
+    # Warning Zone = (robust_value, nominal]. robust_value == nominal이면 이 구간은
+    # 공집합이다 — "20,000원 ~ 20,000원"처럼 폭이 0인 숫자 구간으로 보여주지 않고
+    # warning_status="NONE"으로 명시한다(FIX-2, 02_FIX_1차원SafeZone_4개.md).
+    # robust_value < nominal일 때만 실제 경고구간이 존재한다.
+    if robust_value >= nominal:
+        warning_status = "NONE"
+        warning_zone = {"min_exclusive": None, "max_inclusive": None}
+    else:
+        warning_status = "CALCULATED"
+        warning_zone = {"min_exclusive": robust_value, "max_inclusive": nominal}
 
     # 3) 현재 계획 행동 x의 zone 판정 (03_1차원_구간판정_규칙.md 그대로)
     if planned_x is None:
@@ -399,8 +410,39 @@ def compute_safe_zone(
 
     return SafeZoneResult(
         nominal_safe_limit=nominal, robust_safe_limit=robust_value, robust_status=robust_status,
-        robust_safe_zone=robust_safe_zone, warning_zone=warning_zone,
+        robust_safe_zone=robust_safe_zone, warning_zone=warning_zone, warning_status=warning_status,
         binding_constraints=binding, current_zone=current_zone,
         financial_cliff=financial_cliff, cliff_status=cliff_status,
         optimal_safe_range=optimal_safe_range, optimal_status=optimal_status,
     )
+
+
+def reversal_explanation(*, D: float, G: float, ttr: Optional[int]) -> str:
+    """Action Reversal(정의: D > 0 AND G < 0) 여부의 근거를, 상단 PASS/REVIEW/HOLD
+    판정 사유(decide()의 reason — TTR/TTB 기준 문구)와 분리해서 설명하는 문구를 만든다.
+
+    왜 필요한가(FIX-4, 02_FIX_1차원SafeZone_4개.md): decide()의 reason은 "누적 전체효과
+    G가 TTR개월 뒤 음수로 전환된다"는 사실을 말하는데, 이건 Action Reversal의 엄격한
+    수학적 정의(D>0 AND G<0)와 다른 이야기다. D=0인데 G<0인 사례에서 두 문구를 그냥
+    나란히 보여주면 "reversal=아니오"인데 왜 "손실로 전환"이라고 하는지 모순처럼
+    보인다 — 그래서 이 함수는 D/G 값을 근거로 "왜 reversal인지/아닌지"만 명시적으로
+    설명하고, "언제 누적효과가 음수가 되는지"는 별도 필드(TTR)로 남겨 화면에서
+    각자 다른 자리에 표시하게 한다.
+    """
+    reversal = D > 0 and G < 0
+    if reversal:
+        return (f"직접효과 D={round(D):,}원 > 0이고 전체효과 G={round(G):,}원 < 0이므로 "
+                f"Action Reversal 정의(D>0, G<0)에 해당합니다 — 당장은 이득이나 전체 손익은 손실입니다.")
+    if D <= 0 and G < 0 and ttr is not None:
+        return (f"직접효과 D={round(D):,}원이 0 이하이므로 Action Reversal 정의(D>0, G<0)에는 "
+                f"해당하지 않습니다. 다만 누적 전체효과(G)는 {ttr}개월 뒤 음수로 전환됩니다 — "
+                f"이는 Action Reversal 여부와는 별개의 사실입니다.")
+    if D <= 0 and G < 0:
+        return (f"직접효과 D={round(D):,}원이 0 이하이므로 Action Reversal 정의(D>0, G<0)에는 "
+                f"해당하지 않습니다. 전체효과 G={round(G):,}원도 음수이지만, 이는 D>0인 이득이 "
+                f"나중에 반전된 것이 아니라 처음부터 손실입니다.")
+    if D > 0 and G >= 0:
+        return (f"직접효과 D={round(D):,}원 > 0이고 전체효과 G={round(G):,}원도 0 이상이므로 "
+                f"Action Reversal이 아닙니다.")
+    return (f"직접효과 D={round(D):,}원, 전체효과 G={round(G):,}원 — 손실 전환이 관측되지 않아 "
+            f"Action Reversal이 아닙니다.")

@@ -4,10 +4,11 @@
 해두면 돼." 이 문서는 그 준비 기록이다 — **여기 적힌 걸로 Freeze가 선언된 게
 아니다.** 실제 Freeze는 유료 API로 sanity rerun까지 끝난 뒤 박승렬이 선언한다.
 
-기록 시각: 2026-08-28 (3차 갱신 — 박승렬의 "수학 고도화 추가팩"(11개 문서, Safe Zone
-math v1.2)을 반영함. 2차 갱신은 프롬프트 원문/37행 원장 CSV/Evidence Bundle CSV 반영,
-최초 기록은 2026-08-27). 이후 파일이 바뀌면 이 표는 최신이 아니게 되므로, Freeze
-선언 직전에 아래 명령으로 다시 계산해서 갱신할 것.
+기록 시각: 2026-08-30 (4차 갱신 — 박승렬의 "1차원 Safe Zone 수정 패치팩"(FIX-1~4)을
+반영함. 3차 갱신은 "수학 고도화 추가팩"(11개 문서, Safe Zone math v1.2), 2차 갱신은
+프롬프트 원문/37행 원장 CSV/Evidence Bundle CSV 반영, 최초 기록은 2026-08-27). 이후
+파일이 바뀌면 이 표는 최신이 아니게 되므로, Freeze 선언 직전에 아래 명령으로 다시
+계산해서 갱신할 것.
 
 ## 1. 코드/데이터 SHA-256
 
@@ -18,10 +19,10 @@ math v1.2)을 반영함. 2차 갱신은 프롬프트 원문/37행 원장 CSV/Evi
 | Output schema + Gate (ExtendedRuleSchema/EvidenceGate) | `ablation/blind25_fixed.py` | `e4ffab1a50ffbf3c7be78652f5117e973da78f33388445fd15c37bb1322ff5f0` |
 | Gemini wide-schema compiler (System B/C 호출부, **프롬프트 원문 반영 후 해시 변경**) | `ablation/wide_compiler.py` | `b7a30231d5423902d4aa2827beb3b8e3516216e45f1150b5f9727a50e1adce48` |
 | DEV25 runner | `ablation/dev25_runner.py` | `fcdf7e180bc6ba1284bb5adea9c816a5ce90ef80de07561ab2c102e6e154b66c` |
-| Deterministic engine (scoring/계산 로직, **Safe Zone v1.2 추가 후 해시 변경**) | `mvp/engine.py` | `c0973d322e422ab33f4dfae43beeaa155e50b57fd7de58c180f20fd2d4322002` |
+| Deterministic engine (scoring/계산 로직, **`warning_status`/`reversal_explanation()` 추가로 해시 재변경**) | `mvp/engine.py` | `7a61b14da7d67f367029404bff12f84674ca387a0c36b335fa4726f780ad6662` |
 | Rule store (**`known_institutions()` + `match()`에 product 파라미터/`known_products()` 추가로 해시 재변경**) | `mvp/rule_store.py` | `2af7c675be20e494cd5997627854af8ce52ccf65f469f0fcb5118112adb12b22` |
-| 웹/API 엔트리포인트 (**Safe Zone API 스키마 배선 + `/api/health` institutions/products 목록 + `/api/evaluate` product 파라미터로 해시 재변경**) | `mvp/app.py` | `894835633678b74ad2daaa6f4e46c7c0cd885f20ec30ddc55bedca89fc7a99b3` |
-| MVP 프론트 (**06_MVP_표시명세.md 12항목 재구성 + 은행/상품 선택 드롭다운(독립 2개) 추가로 해시 재변경**) | `mvp/static/index.html` | `81f1a20f9993e3f95e5066d892a93a45d83537d209a75af8ca4d3c79ce198764` |
+| 웹/API 엔트리포인트 (**FIX-1~4: effects.D/L/G·financial_cliff에 unit/horizon_months, reversal_reason, warning_status 추가로 해시 재변경**) | `mvp/app.py` | `810586f3f0d3434c9484af4994e0c469586c026cffe03cac6b92d075d257c60d` |
+| MVP 프론트 (**FIX-1~4: "계산 안 함" 문구 제거, Warning Zone 공집합 표시, Cliff/D·L·G horizon 표기, Action Reversal 문구 분리로 해시 재변경**) | `mvp/static/index.html` | `c377bb127177b97464de7d56a62d099c51bc0605e00ff2ab0f8b81b46f163fbc` |
 | 공통 데이터 스키마 (**`TypedActionDelta.institution` + `.product` 필드 추가로 해시 재변경**) | `mvp/schemas.py` | `743e1f2969b2c6191e1e12da1703abb41699220f31b711939e8a381a11644aae` |
 | 자연어 행동 해석기 (**은행명 감지 + 상품명 감지(독립) 로직 추가로 해시 재변경**) | `mvp/action_interpreter.py` | `ee0ee4eef33b34dbe659fc29d92fa98997a13fd8a4d84308c8bd1477b5501f20` |
 | 배포용 규칙 8개 (**원장 재확인 3건 반영 후 해시 재변경**) | `mvp/demo_rules.json` | `aa58db204da101c3a3fb29cbc53dc08fc5a3824128d6efcaad870251c999eaa0` |
@@ -29,9 +30,10 @@ math v1.2)을 반영함. 2차 갱신은 프롬프트 원문/37행 원장 CSV/Evi
 | **Evidence Bundle 보조 근거 CSV** (신규 확보) | `evidence_bundle_20260821.csv` | `5cd3f79f3ba9f5935f484c376e6ddb866e1afd07b85b4921659c89702754a214` |
 | Dependency 목록 | `requirements.txt` | `d7522163b3fe5c6d85af7a2067d15773a9d49f71cc0998bc6bbb2850df015227` |
 | Dockerfile (runtime) | `Dockerfile` | `59996b2395742035cbc14a4494c6ffced118f297cfe8245975c96e9b81eb52e0` |
-| CHANGELOG (**MATH-V12-001 + FEAT-INSTITUTION-001 + FEAT-PRODUCT-001 추가로 해시 재변경**) | `CHANGELOG.md` | `1f0f4b441ec54aa8935b85b1ff45f1a71c08bc7ab814b9e3822a6de3e402378c` |
+| CHANGELOG (**MATH-V12-001 + FEAT-INSTITUTION-001 + FEAT-PRODUCT-001 + FIX-SAFEZONE-UI-001 추가로 해시 재변경**) | `CHANGELOG.md` | `36e2baa854a114b811f61db57ca3e5441d635e0ef38329c6f7ee4b96ab3fc7e9` |
 | Safe Zone v1.2 회귀테스트 (25개 필수 케이스) | `tests/test_safezone_v12.py` | `bb8b36c6f29873cad06982c903994e2cba71182ce8ae223b92a3cb5cf00c1463` |
-| Action interpreter 회귀테스트 (**은행명 6개 + 상품명 8개 감지 케이스 추가로 해시 재변경, 총 22개**) | `tests/test_action_interpreter.py` | `f29d7d46b1e9564ba3c9746f18223513c5a04f6dcf5f4f03b3e5082d67c36073` |
+| Action interpreter 회귀테스트 (은행명 6개 + 상품명 8개 감지 케이스, 총 22개) | `tests/test_action_interpreter.py` | `f29d7d46b1e9564ba3c9746f18223513c5a04f6dcf5f4f03b3e5082d67c36073` |
+| **FIX-1~4 회귀테스트** (신규, 24개 — warning_status/D·L·G·cliff unit·horizon/reversal_reason/determinism/"계산 안 함" 제거 확인) | `tests/test_fix4_safezone.py` | `a0a305e29bde8df2d73a7b30c36c797e24ad08c58c22c21365d0217d6f242f21` |
 
 재계산 명령:
 ```bash
@@ -43,7 +45,7 @@ for f in ['ablation/baseline_regex.py','mvp/ai_rule.py','ablation/blind25_fixed.
           'mvp/action_interpreter.py','mvp/demo_rules.json',
           'action_reversal_rule_ledger_v3.csv','evidence_bundle_20260821.csv',
           'requirements.txt','Dockerfile','CHANGELOG.md','tests/test_safezone_v12.py',
-          'tests/test_action_interpreter.py']:
+          'tests/test_action_interpreter.py','tests/test_fix4_safezone.py']:
     print(f, hashlib.sha256(open(f,'rb').read()).hexdigest())
 "
 ```
@@ -62,6 +64,36 @@ for f in ['ablation/baseline_regex.py','mvp/ai_rule.py','ablation/blind25_fixed.
 없는 이름을 지어내지 않는다는 원칙 유지. 회귀 테스트 총 14개 추가(은행명 6 +
 상품명 8), 전체 재실행 **135 passed, 0 failed**. DEV25 A/B/C 파이프라인은
 `TypedActionDelta`를 쓰지 않아(grep 재확인) 이번 변경과 완전히 무관하다.
+
+### 1차원 Safe Zone 수정 패치팩 FIX-1~4 (2026-08-30)
+
+박승렬이 배포 화면에서 확인한 4개 문제(Robust Safe Zone "숫자 범위 + 계산 안 함"
+동시표시 모순 / Warning Zone 공집합이 "20,000~20,000원"으로 보임 / Financial Cliff와
+D·L·G 숫자가 왜 다른지 설명 없음 / 상단 판정 사유와 Action Reversal 문구가 모순처럼
+읽힘)를 전부 수정했다(`FIX-SAFEZONE-UI-001`, 상세는 `CHANGELOG.md` 참고).
+
+핵심만 요약하면: (1)·(2)는 대부분 **기존 계산 로직이 이미 정책에 맞았고 화면 문구만
+모순됐던 것**이라 engine.py의 계산식은 거의 안 건드리고 `SafeZoneResult`에
+`warning_status` 필드 하나만 추가했다. (3)은 계산 오류가 아니라 **Financial
+Cliff(항상 12개월 누적)와 D/L/G(TTR/TTB 시점 누적, 12개월보다 이를 수 있음)가 원래
+서로 다른 기간을 가리키는 값**이었던 것을 확인하고, API 응답에
+`{value, unit, horizon_months}` 형태로 기간을 명시했다. (4)는 `reversal_explanation()`
+순수 함수를 새로 추가해서 "누적효과가 언제 음수로 전환되는가"(TTR, 상단 reason)와
+"Action Reversal 정의(D>0,G<0)에 해당하는가"(effects.reversal_reason)를 완전히
+분리된 필드/문구로 나눴다.
+
+기존 `effects.D`/`L`/`G`가 이산 판정(해지/계좌변경) 유형에서 여전히 `None`으로
+남아야 한다는 기존 회귀테스트(`test_safezone_v12.py`#16)와의 호환을 위해, 이 유형은
+객체가 아니라 그대로 `None`을 유지하도록 했다(연속 유형만 `{value,unit,
+horizon_months}` 객체로 바뀜) — 타입이 유형별로 다르지만 값이 없으면 `null`이라는
+원칙은 유지된다.
+
+회귀 테스트 총 24개 신규 추가(`tests/test_fix4_safezone.py`), 전체 재실행
+**159 passed, 0 failed**(기존 135 + 신규 24). Playwright로 실제 화면을 렌더링해서
+스크린샷으로 4개 항목이 실제로 고쳐졌는지 육안 확인함(대표 입력: 카드사용 5만원
+이동, KB_CARD_LOAN_STEP 매칭, decision=HOLD). DEV25 A/B/C 파이프라인(`ablation/`)은
+`reversal_explanation`/`warning_status`/`horizon_months` 어느 것도 참조하지 않는다
+(grep 재확인, 매치 0건) — 이번 변경과 완전히 무관하다.
 
 ### Safe Zone math v1.2 반영 (2026-08-28, 박승렬 "수학 고도화 추가팩" 11개 문서)
 

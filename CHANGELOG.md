@@ -5,6 +5,80 @@
 ---
 
 ## 변경 ID
+FIX-SAFEZONE-UI-001
+
+### 문제
+박승렬이 배포된 화면에서 확인한 4개 표시·정책·단위 문제
+(02_FIX_1차원SafeZone_4개.md, 03_필수_회귀테스트_체크리스트.md,
+04_Optimal_Safe_Range_다음단계.md, 05_최종_반환물_목록.md, 06_SELF_AUDIT.md):
+
+1. Robust Safe Zone: "0~20,000원" 숫자 범위와 "불확실성 데이터가 없어 계산 안 함"이
+   동시에 표시돼 모순으로 보임.
+2. Warning Zone: robust_limit == nominal_limit일 때 "20,000원 ~ 20,000원"처럼 폭이
+   0인 구간이 실제 경고구간인 것처럼 표시됨.
+3. Financial Cliff(-83,333원)와 D/L/G(각 -8,333원)의 숫자가 왜 다른지 화면/API에
+   설명이 없어 계산 오류처럼 보임.
+4. 상단 판정 사유("2개월 뒤 전체 손익이 손실로 전환됨")와 "Action Reversal: 아니오"가
+   나란히 나와서 모순처럼 읽힘(D=0이라 Action Reversal 정의(D>0,G<0)엔 안 맞지만,
+   누적 G가 음수로 전환되는 것 자체는 사실).
+
+### 변경
+- `mvp/engine.py` (추가만 — 기존 함수 로직은 안 건드림):
+  - `SafeZoneResult`에 `warning_status` 필드 추가(`CALCULATED`/`NONE`/
+    `NOT_APPLICABLE`). `robust_value >= nominal`이면 `NONE` + warning_zone 양쪽 null.
+  - `reversal_explanation(D, G, ttr)` 신규 순수 함수 — Action Reversal 정의(D>0,G<0)
+    충족 여부를 D/G 값 근거로 설명하는 문구를 만든다(TTR 기준 "누적효과 음수전환"
+    문구와는 별개).
+- `mvp/app.py`:
+  - `HORIZON_MONTHS = 12` 상수 도입, `compute_safe_zone()`/`simulate()` 호출에 명시적
+    으로 전달(매직넘버 제거).
+  - `/api/evaluate`의 `effects.D`/`L`/`G`를 `{value, unit, horizon_months}` 객체로,
+    `safety.financial_cliff`를 `{value, unit, horizon_months}` 객체로 재구성(이산
+    판정 유형은 기존처럼 `null` 그대로 — `test_safezone_v12.py`#16과 호환 확인).
+  - `effects.reversal_reason` 필드 추가(연속 유형은 `reversal_explanation()` 결과,
+    이산 유형은 기존 `discrete.reason` 재사용).
+  - `safety.warning_status` 필드 추가.
+- `mvp/static/index.html`:
+  - Robust Safe Zone NOT_APPLICABLE 라벨에서 "계산 안 함" 제거 → "불확실성 정보
+    없음 → Nominal Safe Zone과 동일"로 교체 + 설명 note 추가.
+  - Warning Zone: `warning_status`가 NONE/NOT_APPLICABLE이면 숫자 범위 대신 "해당
+    없음" 문구 표시.
+  - Financial Cliff / D·L·G: 각 스탯 제목에 "(N개월 누적)" 표기, horizon이 서로
+    다를 때만 "기준 시점이 달라 숫자가 차이 날 수 있습니다(계산 오류 아님)" note.
+  - Action Reversal: 섹션 제목에 정의(D>0 AND G<0) 명시 + `reversal_reason` 문장을
+    상단 판정 사유와 별도 줄에 표시.
+
+DEV25 A/B/C 추출 파이프라인(`ablation/`)은 이 변경으로 전혀 건드리지 않았다 — grep
+으로 `reversal_explanation`/`warning_status`/`horizon_months`가 `ablation/`에 하나도
+없음을 확인함.
+
+### 특정 테스트 맞춤 여부
+NO. 새 테스트(`tests/test_fix4_safezone.py`)는 기존 test_safezone_v12.py와 동일한
+합성 픽스처(KB_CARD_LOAN_STEP, HIST3=[220000,220000,220000], BASELINE=220000)를 쓴다.
+DEV25 U-ID나 Gold 문자열을 참조한 곳이 없다.
+
+### 신규/수정 테스트
+`tests/test_fix4_safezone.py` (신규 파일, 24개 체크 — FIX-1~4 acceptance 항목 +
+determinism + "계산 안 함" 문구 제거를 정적으로 확인). 기존 6개 테스트 파일(총 135개:
+test_action_interpreter 22 / test_ai_rule 23 / test_baseline_regex 30 /
+test_dev25_runner 12 / test_engine 22 / test_safezone_v12 26)은 한 줄도 수정하지
+않았다.
+
+### 결과
+변경 전: 135 passed, 0 failed 6개 파일.
+변경 후: 159 passed, 0 failed 7개 파일 (기존 135 + 신규 24, 회귀 없음).
+
+### 관련 파일
+- `mvp/engine.py` (추가만 — `warning_status`/`reversal_explanation`)
+- `mvp/app.py` (`/api/evaluate` 응답 스키마 확장 — D/L/G·financial_cliff에 unit/
+  horizon_months, reversal_reason, warning_status)
+- `mvp/static/index.html` (라벨 문구 수정 + 신규 필드 반영)
+- `tests/test_fix4_safezone.py` (신규)
+- FREEZE_PREP.md에 이번 변경의 파일 해시를 별도로 기록함
+
+---
+
+## 변경 ID
 FEAT-PRODUCT-001
 
 ### 문제

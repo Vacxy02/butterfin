@@ -21,7 +21,8 @@ import json
 
 from rule_store import RuleStore
 from action_interpreter import interpret
-from engine import simulate, safe_limit, decide, evaluate_discrete_rule, tier_lookup, compute_safe_zone, ENGINE_VERSION
+from engine import (simulate, safe_limit, decide, evaluate_discrete_rule, tier_lookup,
+                     compute_safe_zone, reversal_explanation, ENGINE_VERSION)
 
 APP_START = time.time()
 AR_MODE = os.environ.get("AR_MODE", "DEMO")
@@ -37,6 +38,14 @@ with open(store.path, "rb") as _f:
 # 데모 기본값 (사용자가 안 채우면 이 값 사용 — 업무지시서 §5 데모 시나리오)
 DEFAULT_HIST3 = [220000, 220000, 220000]
 DEFAULT_BASELINE = 220000
+
+# Financial Cliff는 항상 "horizon(12개월) 누적 G의 경계 점프"이고, 화면에 보여주는
+# D/L/G effects는 "as_of_month(TTR/TTB 시점, 12개월보다 이를 수 있음) 시점의 누적값"이다.
+# 이 둘은 원래 서로 다른 시점 기준이라 숫자가 다를 수 있다 — 우연한 계산 오류가
+# 아니라 의도된 차이다. 그걸 화면/API 응답에서 명확히 구분하려고(FIX-3,
+# 02_FIX_1차원SafeZone_4개.md) horizon을 매직넘버로 여기저기 흩어두지 않고 여기
+# 한 곳에서만 정의해서 compute_safe_zone()/simulate() 호출에 명시적으로 넘긴다.
+HORIZON_MONTHS = 12
 
 
 def _self_check() -> dict:
@@ -132,43 +141,66 @@ def api_evaluate():
         # 나온다(임의 버퍼를 만들지 않는다는 명세 §5 원칙).
         zone = compute_safe_zone(hist3=hist3, baseline_monthly=baseline, rules=rules_for_engine,
                                   planned_x=amount, linked_balance=linked_balance,
-                                  direct_benefit_monthly=direct_benefit)
+                                  direct_benefit_monthly=direct_benefit, horizon=HORIZON_MONTHS)
 
         # decide()/TTB/TTR은 여러 계약 중 가장 엄격한(binding) 계약 기준으로 계산한다 —
         # 그게 실제로 먼저 문제가 될 계약이기 때문이다.
         binding_rule = by_id[zone.binding_constraints[0]]
         sim = simulate(hist3=hist3, baseline_monthly=baseline, shift_monthly=amount,
                         thresholds=_rule_to_thresholds(binding_rule), linked_balance=linked_balance,
-                        direct_benefit_monthly=direct_benefit)
+                        direct_benefit_monthly=direct_benefit, horizon=HORIZON_MONTHS)
         result = decide(freshness_ok=freshness_ok, inputs_sufficient=True, rule_matched=True, sim=sim)
 
         # D/L/G(실제 원 금액)와 Action Reversal 여부 — "왜 HOLD인지" 판정 근거가 된
         # 시점의 값을 보여준다: 위반이 확인된 시점(ttr)이 있으면 그 시점, 없고 구간
-        # 변화 시점(ttb)만 있으면 그 시점, 둘 다 없으면(=PASS) 12개월 누적값.
+        # 변화 시점(ttb)만 있으면 그 시점, 둘 다 없으면(=PASS) horizon 누적값.
         as_of_month = sim.ttr if sim.ttr is not None else (sim.ttb if sim.ttb is not None else len(sim.G) - 1)
         D_won = round(sim.D[as_of_month])
         L_won = round(sim.L[as_of_month])
         G_won = round(sim.G[as_of_month])
         reversal = bool(sim.D[as_of_month] > 0 and sim.G[as_of_month] < 0)
+        # FIX-4: "누적 전체효과가 언제 음수로 전환되는가"(TTR, 위 result/reason에 이미
+        # 있음)와 "Action Reversal 정의(D>0,G<0)에 해당하는가"를 화면 문구에서 분리
+        # 하기 위한, D/G 값 근거의 별도 설명 텍스트.
+        reversal_reason = reversal_explanation(D=sim.D[as_of_month], G=sim.G[as_of_month], ttr=sim.ttr)
 
         evidence = [{"rule_id": r["rule_id"], "source_url": r["source_url"], "verified_at": r["verified_at"]}
                     for r in qualifying_rules]
+
+        # FIX-3: Financial Cliff는 항상 HORIZON_MONTHS(12개월) 누적 G의 경계 점프값이고,
+        # D/L/G는 as_of_month(TTR/TTB 시점 — 12개월보다 이를 수 있음) 시점 누적값이다.
+        # 서로 다른 시점 기준이라는 걸 값만 보고는 알 수 없어서, 숫자를 value/unit/
+        # horizon_months 3개로 묶어 API 응답과 화면 양쪽에서 명시한다(05_최종_반환물_목록.md
+        # "engine response JSON 최소 확인키" 형식을 따름). 기존 클라이언트가 참조할 수
+        # 있는 bare-number 필드는 만들지 않는다 — 이 구조가 신규이므로 구버전 호환
+        # 필드는 "dlg"(아래) 하나로 유지한다.
+        financial_cliff_detail = (
+            {"value": round(zone.financial_cliff), "unit": "원", "horizon_months": HORIZON_MONTHS}
+            if zone.financial_cliff is not None else None
+        )
 
         return jsonify({
             **result,
             "matched_rules": [r["rule_id"] for r in qualifying_rules],
             # 05_API_응답_권장스키마.json 형식
             "action": {"type": action_type, "amount": amount, "unit": "원"},
-            "effects": {"D": D_won, "L": L_won, "G": G_won, "reversal": reversal},
+            "effects": {
+                "D": {"value": D_won, "unit": "원", "horizon_months": as_of_month},
+                "L": {"value": L_won, "unit": "원", "horizon_months": as_of_month},
+                "G": {"value": G_won, "unit": "원", "horizon_months": as_of_month},
+                "reversal": reversal,
+                "reversal_reason": reversal_reason,
+            },
             "safety": {
                 "nominal_safe_limit": zone.nominal_safe_limit,
                 "robust_safe_limit": zone.robust_safe_limit,
                 "robust_status": zone.robust_status,
                 "robust_safe_zone": zone.robust_safe_zone,
                 "warning_zone": zone.warning_zone,
+                "warning_status": zone.warning_status,
                 "current_zone": zone.current_zone,
                 "binding_constraints": zone.binding_constraints,
-                "financial_cliff": zone.financial_cliff,
+                "financial_cliff": financial_cliff_detail,
                 "cliff_status": zone.cliff_status,
                 "optimal_safe_range": zone.optimal_safe_range,
                 "optimal_status": zone.optimal_status,
@@ -204,11 +236,12 @@ def api_evaluate():
         **result,
         "matched_rules": [rule["rule_id"]],
         "action": {"type": action_type, "amount": None, "unit": None},
-        "effects": {"D": None, "L": None, "G": None, "reversal": discrete.violation},
+        "effects": {"D": None, "L": None, "G": None, "reversal": discrete.violation,
+                    "reversal_reason": discrete.reason},
         "safety": {
             "nominal_safe_limit": None, "robust_safe_limit": None, "robust_status": "NOT_APPLICABLE",
             "robust_safe_zone": {"min": None, "max": None},
-            "warning_zone": {"min_exclusive": None, "max_inclusive": None},
+            "warning_zone": {"min_exclusive": None, "max_inclusive": None}, "warning_status": "NOT_APPLICABLE",
             "current_zone": "NOT_APPLICABLE", "binding_constraints": [rule["rule_id"]],
             "financial_cliff": None, "cliff_status": "NOT_APPLICABLE",
             "optimal_safe_range": None, "optimal_status": "NOT_APPLICABLE",
