@@ -5,6 +5,337 @@
 ---
 
 ## 변경 ID
+FREEZE-CANDIDATE-FINAL-PRE-SANITY-2026-08-31
+
+### 배경
+박승렬의 "Butterfin - 동학 최종 수정 요청"(기준: Claude 검증회신 2026-08-31 오후,
+목표: sanity rerun 직전 Freeze 후보 마감) 지시 반영. API 재실행/FINAL_UNSEEN/
+prompt·Gold·schema 튜닝/특정 U-ID 특례 없이 일반 규칙으로만 4개 항목 반영. 각 항목
+1줄:
+
+- `mvp/ai_rule.py` + `ablation/wide_compiler.py` + `ablation/dev25_runner.py` +
+  `ablation/scoring_contract.md` + `README.md` + `tests/test_ai_rule_openai_provider.py`:
+  공식 System B provider를 GPT로 확정 — "GPT 실험용/비공식/공식 Gemini 결과 아님"
+  라벨을 전부 "DEV25 공식 System B — GPT, 2026-08-31 확정"으로 교체. 이미 완료된
+  DEV25 25×3 GPT 실행 결과가 공식 블라인드 재채점 대상이 됨(DEV25는 development
+  benchmark로 계속 유지, FINAL_UNSEEN 아님). `dev25_runner.py`의 공식/참고 출력
+  파일명을 뒤집음(`AI_PROVIDER=openai`→`DEV25_RESULTS.xlsx`=공식,
+  gemini→`DEV25_RESULTS_GEMINI_REFERENCE.xlsx`=참고). `AI_PROVIDER` 기본값은
+  여전히 `"gemini"`이고 `_MODEL`/`api_key_present()`/`live_status()`(별도
+  라이브 데모용)는 손대지 않음 — 순수 명칭/문서 정합화이며 GPT 결과 숫자를 보고
+  prompt/model을 바꾼 것은 아님.
+- `ablation/dev25_runner.py`: EVAL_STRICT 실행 사실을 결과물에 기록 — `run()` 시작
+  시 콘솔에 `EVAL_STRICT=.../AI_PROVIDER=...` 로그 출력, checkpoint와 나란히
+  `dev25_run_metadata_<provider>.json`을 써서 eval_strict/provider/시작·종료
+  시각/status/총행수/is_mock 기록(xlsx 컬럼 대신 metadata 파일 방식 선택 — schema
+  변경 회피). `--require-eval-strict` CLI 플래그(기본 off) 추가 — 지정 시
+  EVAL_STRICT=1이 아니면 fail-fast로 실행 자체를 중단.
+- `mvp/static/index.html`: TTB 표시 라벨을 "TTB (구간 이탈 시점)" →
+  "TTB (우대 조건이 깨지는 시점)"으로 수정(TTR 라벨은 기존 수정본 유지).
+- `action_reversal_rule_ledger_v3.csv`: 신원 승인 항목 A~D 반영, 37행→39행.
+  `HANA_HISTORY_SAVINGS`(effect_value=4.7/effect_kind=rate_bonus로 정정),
+  `SHINHYUP_CARD_USAGE`→`SHINHYUP_CARD_USAGE_T2`(threshold 1→8 정정 — 행 자체의
+  기존 evidence_span/clause_locator가 이미 "8회 이상"을 근거로 명시), 신규
+  `SHINHYUP_CARD_USAGE_T1`(4~7회, 2.5%p), 신규 `HF_RATE_FLOOR_NEWLYWED`(생애최초
+  신혼가구 최종금리 하한 1.2%). 값은 전부 `mvp/demo_rules.json`의 기존
+  `ledger_reconfirmed_2026-08-28`(승렬 확정자료)를 그대로 사용 — 신규 조사 없음.
+  최종 행수는 미리 선언하지 않고 반영 후 재측정함.
+
+### 하지 않은 것 (지시대로)
+API 재실행 0회. sanity rerun 없음. FINAL_UNSEEN 미수집/미작성/미노출. prompt/schema/
+Gold 변경 없음. 특정 U-ID/DEV25 문항 전용 예외 없음.
+
+### 검증
+`for f in tests/*.py; do AR_ROOT=$(pwd) python3 "$f"; done` — **190 passed, 0 failed**
+(9개 파일, `test_ai_rule_openai_provider.py`의 라벨 단언문 갱신 포함 전부 통과, 기존
+대비 회귀 없음). `evidence_bundle_check.py`는 최초에는 저장소에 없어(find/grep 확인)
+대체 스크립트(`/root/work/grounding_check.py`)로만 검증했으나, 동학이 실제 파일을
+전달해서 정식 스크립트로 재검증했다. 첫 실행은 **실패(exit 1, 46/49)** —
+`HANA_HISTORY_SAVINGS`/`SHINHYUP_CARD_USAGE_T1`/`SHINHYUP_CARD_USAGE_T2`의
+effect_value가 원장-번들(`evidence_bundle_20260821.csv`) rule_id 불일치로 접지
+안 됨(원장 rule_id를 개명/신규 추가하면서 번들을 같이 안 갱신한 게 원인, 값 자체는
+`demo_rules.json`의 기존 확정 인용문 그대로 옳았음). 번들 CSV를 같은 rule_id로
+동기화(신규 조사 없음, 기존 확정 인용문만 사용)한 뒤 재실행 — **전체 활성 필드
+접지 89/89 (100%), exit 0 통과**. 상세는 FREEZE_PREP.md "최종 수정 요청 반영" 절
+참고.
+
+### 관련 파일
+- `mvp/ai_rule.py`, `ablation/wide_compiler.py`, `ablation/dev25_runner.py`,
+  `ablation/scoring_contract.md`, `README.md`, `tests/test_ai_rule_openai_provider.py`
+  (GPT 공식화 라벨링)
+- `ablation/dev25_runner.py` (EVAL_STRICT metadata 기록 + `--require-eval-strict`)
+- `mvp/static/index.html` (TTB 라벨)
+- `action_reversal_rule_ledger_v3.csv` (39행)
+- `evidence_bundle_20260821.csv` (rule_id 동기화 — SHINHYUP_CARD_USAGE_T1 신규/
+  HANA_HISTORY_SAVINGS rate_evidence_span 보강, `evidence_bundle_2026-08-21.csv`
+  하이픈 별칭 사본 포함)
+- `evidence_bundle_check.py` (동학 전달, 리포지토리에 신규 추가)
+- FREEZE_PREP.md에 이번 변경의 파일 해시를 별도로 기록함
+
+---
+
+## 변경 ID
+FREEZE-CANDIDATE-PREP-2026-08-31
+
+### 배경
+박승렬의 "Butterfin - 동학 다음 작업팩"(2026-08-31) 지시 반영. API 재실행/Gold 튜닝/
+U-ID 특례 없이 Freeze 후보 코드만 정리. 각 항목 1줄:
+
+- `mvp/static/index.html`: TTR 표시 라벨을 "TTR (실제 위반 시점)" → "TTR (누적 전체효과가
+  손해로 전환되는 시점)"으로 수정 (engine.py의 실제 정의와 그동안 라벨이 안 맞았음).
+- `ablation/dev25_runner.py`: checkpoint 파일을 provider별로 분리
+  (`dev25_checkpoint_gemini.jsonl` / `dev25_checkpoint_openai.jsonl`) — provider 전환 시
+  옛 provider 결과가 같은 (sample_id, system, run_id) 키로 조용히 재사용/skip되는 위험 제거.
+- `mvp/ai_rule.py` + `ablation/wide_compiler.py`: `EVAL_STRICT=1`(공식 평가모드) 추가 —
+  live 실패 시 과거 cache로 대체하지 않고 `SOURCE_RUN_FAILURE`로 표시, 429/5xx/timeout/
+  network만 재시도, HTTP 200이어도 스키마/내용 검증 실패면 `reject_reason`에
+  "RUN_FAILURE (EVAL_STRICT)"로 명시(둘 다 cache 대체 없음). 기본값(EVAL_STRICT=0)에서는
+  기존 데모/개발 모드 cache-fallback 동작 그대로.
+- `ablation/blind25_fixed.py`: self-check에 남아 있던 U005 원문(source_bundle_text)을
+  DEV25 밖 합성 예시로 교체 — 이 self-check은 캐시/API를 안 타서 결과 오염 문제는
+  아니었고 Freeze 패키지 위생 정리.
+- `ablation/scoring_contract.md`: 구 16필드/Field-Exact Rule Match 정의를 폐기하고,
+  "DEV25 v1.1 LOCK + 박승렬 측 `dev25_scoring_v11.py`가 canonical scoring contract"임을
+  명시하는 참조문서로 교체(수식은 이 리포지토리가 임의로 재정의하지 않음).
+- `ablation/dev25_runner.py`: checkpoint의 `error_log`를 문자열 `"[]"`가 아니라 실제
+  list 타입으로 직렬화(xlsx 저장 시에만 문자열로 변환).
+- Freeze Candidate ZIP에 `ablation/baseline_regex.py`(System A 실제 사용 코드)를 SHA256과
+  함께 포함.
+
+### 하지 않은 것 (지시대로)
+API 재실행 0회. FINAL_UNSEEN 미수집. Gold/현재 결과 기반 튜닝 없음. U001/U002/U004/U013
+전용 코드 없음. 원장 반영(HANA/SHINHYUP/HF 항목)은 신원 승인 전이라 보류.
+
+### 검증
+`for f in tests/*.py; do AR_ROOT=$(pwd) python3 "$f"; done` — **189 passed, 0 failed**
+(기존과 동일, 회귀 없음).
+
+### 추가 (2026-08-31, 동일 세션 후속)
+승렬 측 실제 `dev25_scoring_v11.py`를 전달받아 `ablation/dev25_scoring_v11.py`로 추가.
+`dev25_runner.py` mock 실행 xlsx로 구조 호환 확인(sheet명 "DEV25_RESULTS", sample_id/
+system/run_id/accepted/schema_valid 컬럼 매칭) — Gold 없이 구조만 검증, 채점 수치는
+만들지 않음. `scoring_contract.md`에 반영.
+
+---
+
+## 변경 ID
+FIX-DEV25-OPENAI-STRICT-SCHEMA-001
+
+### 문제
+FEAT-DEV25-OPENAI-EXPERIMENT-001을 실제로 써봤다 — 동학이 실제 유료
+`OPENAI_API_KEY`로 `AI_PROVIDER=openai AR_ROOT=$(pwd) python ablation/dev25_runner.py
+--fresh`를 돌려서 `DEV25_RESULTS_OPENAI_EXPERIMENTAL.xlsx`를 받았는데, 결과를 열어보니
+System A(25건)만 정상이고 **System B 75건이 전부 `accepted=N`, `http_status=400`**
+이었다(System C 75건도 "B 추출 실패로 Gate 적용 대상 없음"으로 연쇄 실패). 실제 GPT
+실험을 처음으로 돌려본 것이었는데, 첫 실행부터 100% 실패였다.
+
+`reject_reason`을 봐도 `"HTTPError: HTTP Error 400: Bad Request"`라고만 찍혀 있어서
+OpenAI가 정확히 뭘 거부했는지 알 수 없었다 — 원인 진단 자체가 막혀 있었다(이건 그
+자체로 두 번째 버그).
+
+### 변경
+`mvp/ai_rule.py`에서 원인 2가지를 찾아 고쳤다.
+
+1. **`_gemini_schema_to_openai_strict()`가 최상위 필드만 변환하고 있었다.** DEV25
+   System B의 실제 스키마(`ablation/wide_compiler._WIDE_SCHEMA`)에는
+   `tiers: {type: array, items: {type: object, properties: {threshold,
+   effect_value}}}`처럼 배열 안에 object가 중첩돼 있는데, OpenAI strict
+   구조화 출력 모드는 **모든** object(중첩된 것 포함)에
+   `additionalProperties: false` + 그 object 자신의 전체 필드를 `required`에
+   넣을 것을 요구한다. 최상위만 변환했더니 `tiers.items`가 이 조건을 못
+   만족해서 API가 요청 자체를 400으로 거부했다 — System B 75건 전원이 같은
+   이유로 실패한 것이 바로 이거였다. 변환 함수를 재귀적으로 고쳐서
+   object/array 어느 깊이에 있든 strict 조건을 채우도록 했다.
+2. **`_call_openai()`가 `HTTPError`의 응답 본문을 안 읽고 있었다.**
+   `str(e)`만 쓰면 "HTTP Error 400: Bad Request"라는, OpenAI가 실제로 뭐라고
+   답했는지 전혀 알 수 없는 문구만 남는다(이 파일 상단에 이미 있던
+   2026-08-18 Gemini 404 사례 — "except가 삼키는 바람에 원인이 안 보였다" —
+   와 정확히 같은 실패 패턴). `except urllib.error.HTTPError`를 별도로 잡아서
+   `e.read()`로 실제 오류 본문(스키마 위반 상세 메시지 등)을 `_LAST_ERROR`에
+   남기도록 고쳤다 — 다음에 비슷한 실패가 나도 원인을 바로 알 수 있다.
+
+캐시 네임스페이스 분리/라벨링/산출 파일명 분리(FEAT-DEV25-OPENAI-EXPERIMENT-001)는
+이 버그와 무관하게 그대로 유지된다 — 이번 수정은 어디까지나 "GPT 호출 자체가
+성공하도록" 고친 것이다.
+
+### 특정 테스트 맞춤 여부
+NO — 다만 이번엔 실제 유료 API 실행에서 나온 실측 실패(75건 전원 400)를 계기로
+찾은 버그라, 회귀테스트도 그 실측 실패를 재현하는 형태로 만들었다. 실제 OpenAI
+네트워크 호출은 여전히 하지 않는다(스키마 변환은 순수 함수 검증, HTTPError 처리는
+`unittest.mock.patch`로 urlopen을 가짜 400 응답으로 대체해 검증).
+
+### 신규/수정 테스트
+`tests/test_ai_rule_openai_provider.py`에 섹션 8 추가(4개 체크 — 17개 → 21개):
+`_gemini_schema_to_openai_strict()`가 실제 `_WIDE_SCHEMA`의 `tiers.items`에도
+`additionalProperties=false`/전체 `required`를 재귀적으로 채우는지, `_call_openai()`
+가 가짜 400 HTTPError(본문 포함)를 받았을 때 `last_error()`에 그 본문이 실제로
+담기는지를 각각 확인. 기존 185개 테스트는 한 줄도 수정하지 않았다.
+
+### 결과
+변경 전: 185 passed, 0 failed 9개 파일 (그리고 실제 키로 돌린 DEV25 실행은 System B/C
+150건 전부 실패).
+변경 후: 189 passed, 0 failed 9개 파일 (기존 185 + 신규 4, 회귀 없음). 실제 25건
+재실행은 동학이 `--fresh`로 다시 돌려서 직접 확인 예정 — 이 세션은 실제
+`OPENAI_API_KEY`를 갖고 있지 않아 실제 네트워크 성공 여부까지는 검증하지 못했다.
+
+### 관련 파일
+- `mvp/ai_rule.py` (`_gemini_schema_to_openai_strict()` 재귀 변환, `_call_openai()`
+  HTTPError 본문 캡처)
+- `tests/test_ai_rule_openai_provider.py` (섹션 8 추가)
+- FREEZE_PREP.md에 이번 변경의 파일 해시를 별도로 기록함
+
+---
+
+## 변경 ID
+FEAT-DEV25-OPENAI-EXPERIMENT-001
+
+### 문제
+FEAT-OPENAI-PROVIDER-001에서 라이브 데모(action_interpreter.py)만 GPT로 바꿀 수
+있게 했을 때, "그럼 DEV25도 그냥 바꾸면 안 되나"는 질문이 이어졌다. 바로 답을
+드리는 대신 위험 3가지를 먼저 설명했다: (1) prompt-model 결합 — System B 프롬프트는
+Gemini 응답 특성 기준으로 확정된 것이라 모델을 바꾸면 그 확정이 무효가 됨,
+(2) 스키마 강제 메커니즘 차이 — Gemini의 `response_schema`(SDK 서버측 강제)와
+OpenAI의 `json_schema`+`strict`(다른 강제 방식, 특히 optional 필드 처리 방식이 다름)
+가 서로 달라서 "정확도 차이"처럼 보이는 게 실은 모델 차이가 아니라 스키마 강제
+방식 차이일 수 있음, (3) 공식 제출 신뢰/라벨링 문제 — GPT로 뽑은 결과가 공식
+Gemini 결과와 섞이거나 혼동되면 심사 신뢰성 문제로 번짐. 동학이 이 설명을 듣고
+"결과 파일명/로그에 GPT 실험용이라고 확실히 표시해서 공식 Gemini 결과랑 절대 안
+섞이게 한다"는 조건으로 명시적으로 승인("그래") — 이번 변경은 그 조건을 실제
+코드로 지킨 것이다.
+
+### 변경
+DEV25 System B/C의 실제 추출 모듈인 `mvp/ai_rule.py`(박승렬 작성)에 실험용
+`AI_PROVIDER` 스위치를 추가했다. FEAT-OPENAI-PROVIDER-001과 같은 패턴(기본값
+`"gemini"`, 안 건드리면 기존 동작 100% 동일)이되, "공식 결과와 절대 안 섞이게"라는
+조건 때문에 세 가지 격리 장치를 추가로 넣었다.
+
+- `mvp/ai_rule.py`:
+  - `AI_PROVIDER`/`_OPENAI_MODEL`/`_OPENAI_API_KEY_ENV` 상수 추가.
+  - `_active_model_name()` 신규 — `_MODEL`(공식 Gemini 준비 상태 판정에 쓰이는
+    상수, **안 건드림**)과 분리된, "이번 호출에 실제로 어떤 모델을 썼는지"
+    라벨링 전용 함수. `AI_PROVIDER=openai`면
+    `"gpt-4o-mini (GPT 실험용 — 비공식, 공식 Gemini 결과 아님)"`처럼 명시적으로
+    표시한다.
+  - `_active_key_present()` 신규 — `api_key_present()`(공식, Gemini 전용, **안
+    건드림**)와 분리된, 실제 쓰이는 provider의 키 유무 판정 전용 함수.
+  - `_cache_path()`: `AI_PROVIDER=openai`면 캐시 파일명에 `_openai_` 네임스페이스를
+    끼워서 Gemini 캐시와 파일명 자체가 절대 겹치지 않게 함.
+  - `_gemini_schema_to_openai_strict()` 신규 — Gemini의 partial-required 스키마를
+    OpenAI strict 모드(전체 required + `additionalProperties: false`) 형식으로
+    변환. optional이던 필드는 nullable로 만들어 "생략 가능" 의미를 보존한다.
+  - `_call_openai()`/`_call_ai()` 신규 — `_call_gemini()`(**안 건드림**)와 동일한
+    fail-closed 계약(네트워크/키 오류를 조용히 삼키지 않고 `_LAST_ERROR`에 남김).
+  - `_invoke()`: `_call_gemini()` 직접 호출 → `_call_ai()` 경유로 한 줄 변경(내부
+    분기만 추가, 캐시 fallback 로직 등 나머지는 그대로).
+  - `api_key_present()`/`live_status()`/`_MODEL`은 의도적으로 **전혀 안 건드림** —
+    "준비됨" 표시가 GPT 설정 때문에 거짓으로 뜨는 일이 구조적으로 불가능하다.
+- `ablation/wide_compiler.py`: `compile_raw()`의 `model_name` 라벨이 `ai_rule._MODEL`
+  을 직접 참조하던 것을 `ai_rule._active_model_name()`으로 교체. (안 고쳤으면
+  `AI_PROVIDER=openai`로 돌려도 DEV25 결과 xlsx의 `model_name` 컬럼에 계속
+  "gemini-3.6-flash"라고 찍혀서, 정작 라벨링 약속이 이 지점에서 깨졌을 것 —
+  검증 중 직접 발견하고 이번 라운드에서 같이 고쳤다.)
+- `ablation/dev25_runner.py`:
+  - `is_mock` 판정을 `ai_rule.live_status()["ready"]`(Gemini 전용) 대신
+    `ai_rule._active_key_present()`(provider-aware)로 교체 — 안 고쳤으면
+    `AI_PROVIDER=openai`+`OPENAI_API_KEY`로 실제 라이브 호출에 성공해도
+    "GEMINI_API_KEY 없음"이라고 잘못 찍었을 것.
+  - `__main__`: `AI_PROVIDER=openai`면 출력 파일을 `DEV25_RESULTS.xlsx`가 아니라
+    `DEV25_RESULTS_OPENAI_EXPERIMENTAL.xlsx`로 분리 저장 — 공식 산출물을 절대
+    덮어쓰지 않는다. 실행 시작 시 "GPT 실험용, 공식 결과 아님" 경고를 콘솔에
+    명확히 출력.
+
+**공식 25문항 Gemini 실행(파이프라인의 실제 목적)은 이 변경으로 전혀 달라지지
+않는다** — `AI_PROVIDER`를 아무도 설정하지 않으면 `ai_rule.py`/`wide_compiler.py`/
+`dev25_runner.py`의 모든 분기가 이전과 정확히 같은 값을 반환한다
+(`tests/test_ai_rule_openai_provider.py` #1~3에서 직접 확인).
+
+### 특정 테스트 맞춤 여부
+NO. `tests/test_ai_rule_openai_provider.py`는 서브프로세스로 실제 환경변수를
+바꿔가며 검증하며(같은 프로세스에서 `os.environ`만 바꾸는 방식은 모듈 로드 시점
+상수라 재적용 안 됨), 실제 네트워크 호출은 하지 않는다(OpenAI 쪽은 키 없을 때의
+fail-closed 경로만, Gemini 쪽은 기존과 동일한 mock/cache 경로만 검증). U-ID나
+Gold 문자열을 참조하지 않는다.
+
+08_DEV25_보호규칙의 "DEV25 파일은 새 세션 심볼을 참조하면 안 된다"는 일반 원칙과
+이번 라운드는 성격이 다르다는 점을 분명히 한다: 이번엔 동학이 `ai_rule.py` 자체를
+실험적으로 확장하는 것을 명시적으로 승인했으므로, 검증 대상은 "안 건드렸는지"가
+아니라 "건드린 부분이 공식 경로로부터 안전하게 격리되는지"다 — 위 세 가지 격리
+장치(공식 판정 함수 불변/ 캐시 네임스페이스 분리 / 라벨링)가 그 검증 대상이다.
+
+### 신규/수정 테스트
+`tests/test_ai_rule_openai_provider.py` (신규 파일, 17개 체크 — 기본값 불변,
+공식 판정 함수(`api_key_present`/`live_status`/`_MODEL`) 불변, 캐시 네임스페이스
+분리, `ai_rule.compile_rule()`/`wide_compiler.compile_raw()` 라벨링,
+`dev25_runner`의 `_active_key_present()` 기반 판정, 출력 파일명 분리). 기존 168개
+테스트는 한 줄도 수정하지 않았다.
+
+### 결과
+변경 전: 168 passed, 0 failed 8개 파일.
+변경 후: 185 passed, 0 failed 9개 파일 (기존 168 + 신규 17, 회귀 없음).
+
+### 관련 파일
+- `mvp/ai_rule.py` (`AI_PROVIDER` 스위치 + 격리 장치 3종 추가)
+- `ablation/wide_compiler.py` (`model_name` 라벨링을 `_active_model_name()` 경유로 수정)
+- `ablation/dev25_runner.py` (`is_mock` 판정 수정, 출력 파일명 분리, 경고 문구 추가)
+- `tests/test_ai_rule_openai_provider.py` (신규)
+- FREEZE_PREP.md에 이번 변경의 파일 해시를 별도로 기록함
+
+---
+
+## 변경 ID
+FEAT-OPENAI-PROVIDER-001
+
+### 문제
+"GEMINI_API_KEY 대신 GPT(OpenAI) API로 바꾸면 쉬운가"라는 질문. Gemini 유료 키가 아직
+없는 상황에서, 라이브 데모(action_interpreter.py의 문장 해석)만이라도 GPT로 돌릴 수
+있으면 좋겠다는 요청.
+
+### 변경
+- `mvp/openai_client.py` (신규): `mvp/gemini_client.py`와 정확히 같은 인터페이스
+  (`call_openai_json`/`has_api_key`/`OpenAIError`)로 OpenAI Chat Completions를
+  호출한다. SDK 의존성 없이 `urllib`만 쓴다(gemini_client.py와 동일한 방식). 키가
+  없으면 네트워크 호출 없이 바로 `OpenAIError`.
+- `mvp/action_interpreter.py`: `AI_PROVIDER` 환경변수(기본값 `"gemini"`)로 Gemini/GPT를
+  선택하는 얇은 분기(`_ai_has_key`/`_ai_call`/`_ai_model_name`)를 추가했다.
+  `AI_PROVIDER`를 아무도 안 건드리면 기존 동작이 한 글자도 안 바뀐다(기본값이
+  `"gemini"`라서 기존 `gemini_client` 경로 그대로 탐). `AI_PROVIDER=openai` +
+  `OPENAI_API_KEY`를 주면 그쪽으로 분기한다. 은행/상품명 감지(institution/product)는
+  이 분기와 완전히 무관하게 그대로 동작한다(원래도 AI 호출과 독립적인 결정론적
+  로직이었음 — 안 건드림).
+- `.env.example`, `render.yaml`, `README.md`: `AI_PROVIDER`/`OPENAI_API_KEY`/
+  `OPENAI_MODEL` 설정 위치를 문서화.
+
+**DEV25 System B/C(`ablation/wide_compiler.py` → `mvp/ai_rule.py`)는 이 변경에
+포함하지 않았다.** 그쪽 B 프롬프트는 이미 Gemini 기준으로 팀이 확정한 것이라(08_
+DEV25_보호규칙 §2), 모델을 바꾸면 그 확정 자체가 무효가 된다 — 박승렬 확인 없이는
+손대지 않는다는 원칙을 그대로 지켰다. `mvp/ai_rule.py`는 여전히 `GEMINI_API_KEY`/
+`GEMINI_MODEL`만 읽는다(변경 없음, grep으로 재확인: `ablation/`에 `openai`/`OPENAI`/
+`AI_PROVIDER` 참조 0건).
+
+### 특정 테스트 맞춤 여부
+NO. `tests/test_openai_provider.py`는 실제 네트워크 호출 없이(키 없을 때의 결정론적
+fail-closed 경로만) 검증한다 — 진짜 OpenAI API를 실제로 때리는 테스트는 CI에서
+재현 불가능해질 수 있어 자동화 회귀테스트에 넣지 않았다.
+
+### 신규/수정 테스트
+`tests/test_openai_provider.py` (신규 파일, 9개 체크 — provider 분기 기본값/openai
+전환/알 수 없는 값 안전 처리/은행명 감지 독립성/openai_client 키 유무 계약). 기존
+159개 테스트는 한 줄도 수정하지 않았다.
+
+### 결과
+변경 전: 159 passed, 0 failed 7개 파일.
+변경 후: 168 passed, 0 failed 8개 파일 (기존 159 + 신규 9, 회귀 없음).
+
+### 관련 파일
+- `mvp/openai_client.py` (신규)
+- `mvp/action_interpreter.py` (`AI_PROVIDER` 분기 추가)
+- `tests/test_openai_provider.py` (신규)
+- `.env.example`, `render.yaml`, `README.md` (문서화)
+- FREEZE_PREP.md에 이번 변경의 파일 해시를 별도로 기록함
+
+---
+
+## 변경 ID
 FIX-SAFEZONE-UI-001
 
 ### 문제
@@ -270,3 +601,27 @@ test_baseline_regex.py 30 / test_dev25_runner.py 12 / test_action_interpreter.py
 - `tests/test_safezone_v12.py` (신규)
 - `tests/safezone_v12_evidence.json` (신규, 테스트 실행 시 자동 생성)
 - FREEZE_PREP.md에 이번 변경의 파일 해시를 별도로 기록함(§자유서 참고)
+
+---
+
+## 2026-09-02 — Run O sanity rerun provenance / Freeze documentation closeout
+
+### 성격
+문서·메타데이터 기록만 추가. 코드·prompt·schema·Gate·Gold·canonical scorer·Run E 결과·블라인드 채점 점수는 변경하지 않았다. API 재호출 및 재채점 없음.
+
+### Run O 기록
+- 실행 시각: 2026-08-31 17:43~17:48 KST
+- 실행자: 이동학
+- 명령: `AI_PROVIDER=openai EVAL_STRICT=1 AR_ROOT=$(pwd) python ablation/dev25_runner.py --require-eval-strict --fresh`
+- 결과: `DEV25_RESULTS.xlsx`
+- SHA256: `9e4bd6eb764a76641168e9802a78571532da046645600d9c826c65f663c3d5d6`
+- run_metadata SHA256: `c120cbe6073282f265680e907bfe24ab646f69f22249ed56156196e62a74905c`
+- checkpoint SHA256: `3e7309e9a2e4a3eaac8696dd723a58a4491de0a182c62e4678b9fd77f0472c76`
+- console log SHA256: `2630bfc8801bbf0c11140e2c822e44ed92fa5a1a4e7a099bdcdc9bfc861f7287`
+- 실행 상태: `EVAL_STRICT=true`, `AI_PROVIDER=openai`, `is_mock=false`, 175행(A25/B75/C75), B HTTP 200 75/75, retry 0, C는 B 저장출력 75/75 재사용(API 재호출 0).
+
+### 공식성
+Run O는 **재현성 reference run**으로만 보관한다. 공식 DEV25 headline 산출에는 사용하지 않는다. 공식 블라인드 채점 대상은 2026-08-30 완료 Run E `DEV25_RESULTS_OPENAI_EXPERIMENTAL.xlsx`(SHA `4b301f4888ccdcdb8192285bdc0d586576350568931598920982c459e0732164`)이며, 공식 실행의 정체는 `model_name` 문자열이 아니라 사전등록 문서·실행 시점·원본 SHA256으로 확인한다.
+
+### 한계 기록
+사전등록 문서가 "이미 완료된 실행"을 공식으로 지정하는 동시에 이후 코드의 결과 파일명을 `DEV25_RESULTS.xlsx`로 명명해 문서 내부 모호성이 있었다. 2026-09-02 scoring contract 정정으로 Run E 우선 정의를 명시했다. Run O는 채점된 적이 없으므로 Run E/Run O 사이에서 점수에 따른 선택은 하지 않았다.

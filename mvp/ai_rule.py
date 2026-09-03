@@ -43,6 +43,7 @@ REJECTED = "REJECTED"
 
 SOURCE_LIVE = "live"
 SOURCE_CACHE = "cache"
+SOURCE_RUN_FAILURE = "run_failure"  # EVAL_STRICT=1일 때 live 실패를 cache로 덮지 않고 남기는 표시
 
 # Rule Compiler가 뽑는 필드 — 6개만 한다.
 # 18개 전부는 20일에 불가능하고, 대표사례가 요구하는 건 이 6개다.
@@ -70,6 +71,74 @@ _API_KEY_ENV = "GEMINI_API_KEY"
 # 2026-08-18에 gemini-2.5-flash가 신규 사용자에게 막혀 404가 났는데,
 # except가 삼키는 바람에 "캐시 응답"으로만 보이고 원인이 안 보였다.
 _LAST_ERROR: Optional[str] = None
+
+# ── AI_PROVIDER(Gemini/GPT 선택) — 2026-08-30 실험용 추가, 2026-08-31 공식화 ──
+# 이 파일(ai_rule.py)은 DEV25 System B/C의 공식 추출 경로다. 처음엔(2026-08-30)
+# "GPT로 돌리면 어떻게 나오는지 실험만 해보고 싶다"는 요청으로 추가되어 "실험용/
+# 비공식"으로 표시됐지만, 2026-08-31에 박승렬 지시로 **이번 대회의 공식 System B
+# provider가 GPT로 확정**됐다 — 지금까지 진행한 DEV25 25문항×3회 GPT 실행이 공식
+# 블라인드 재채점 대상이다(DEV25 자체는 development benchmark로 계속 유지, GPT
+# 결과를 FINAL_UNSEEN 성능처럼 표현하지 않음). 이 확정은 provider 명칭/문서
+# 정합성을 맞추는 것이며, 기존 GPT 결과 숫자를 보고 prompt/model을 바꾼 게
+# 아니다(성능 맞춤 튜닝 아님) — 아래 구조(캐시 분리, 공식 상태 함수 분리)는
+# 그대로 유지한다.
+#
+# AI_PROVIDER=openai로 돌린 결과는:
+#   1) _MODEL/live_status()/api_key_present() 같은 "공식 상태" 함수는 여전히
+#      GEMINI_API_KEY만 본다 — 이 함수들은 DEV25가 아니라 이 파일 전체(라이브
+#      웹앱의 의미유의성 판정/규칙 컴파일 파이프라인 포함)의 "Gemini 키/SDK
+#      준비 상태"를 보는 범용 함수라서 건드리지 않는다. DEV25 System B provider
+#      확정과는 별개다 — 안 섞는다.
+#   2) 캐시 파일명 자체를 분리한다(_cache_path 참고) — GPT로 뽑은 값이 Gemini
+#      캐시와 파일명이 겹쳐서 섞이는 일이 구조적으로 불가능하다.
+#   3) 기본값은 여전히 "gemini"다 — DEV25 공식 실행은 지금처럼 명시적으로
+#      `AI_PROVIDER=openai`를 지정해서 돈다(자동으로 안 바뀜). 이 파일이 쓰이는
+#      다른 곳(action_interpreter.py 등)은 AI_PROVIDER를 아예 참조하지 않으므로
+#      이번 확정으로 영향받지 않는다.
+AI_PROVIDER = os.environ.get("AI_PROVIDER", "gemini").strip().lower()
+_OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+_OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
+
+# ── EVAL_STRICT(공식 평가모드) — 2026-08-31, Freeze Candidate 정리 ──────────
+# 기본값(EVAL_STRICT 미설정/"0")에서는 지금까지와 동일하게 live 실패 시 과거
+# cache로 조용히 대체한다(데모/개발 모드 — 키가 없어도 화면이 죽지 않아야 함).
+#
+# EVAL_STRICT=1(공식 채점/제출 실행)일 때는 다르다 — "이번 실행이 실제로 API를
+# 불러서 얻은 값"만 결과로 인정해야 평가가 의미 있으므로:
+#   - live 호출이 어떤 이유로든 실패하면(키 없음/네트워크/파싱/스키마 불문)
+#     과거 cache를 읽어 대체하지 않는다 — _invoke()가 SOURCE_RUN_FAILURE로 표시.
+#   - 재시도는 여전히 429/5xx/timeout/network일 때만 한다(wide_compiler._is_retryable,
+#     이 파일은 재시도 루프 자체를 갖지 않는다 — 재시도는 호출부 책임).
+#   - 재시도가 끝난 뒤에도 실패면 그 행은 "RUN_FAILURE"로 명시적으로 남는다
+#     (wide_compiler.compile_raw()의 reject_reason에 "RUN_FAILURE (EVAL_STRICT)"
+#     접두사로 표시됨 — accepted=N과는 별개로 grep 가능하게).
+# 아무도 EVAL_STRICT를 안 건드리면 기본값 "0"이라 기존 동작은 한 글자도 안 바뀐다.
+EVAL_STRICT = os.environ.get("EVAL_STRICT", "0").strip() == "1"
+
+
+def _active_model_name() -> str:
+    """결과에 실제로 찍히는 model 라벨 — 오직 라벨링용이다.
+
+    _MODEL 자체는 위 설명대로 절대 안 건드린다(그건 여전히 "공식 Gemini 준비
+    상태"만 본다 — 라이브 웹앱의 범용 판정 함수이지 DEV25 System B provider
+    확정과는 별개). 이 함수는 Materiality/RuleCandidate.model, 그리고
+    wide_compiler의 DEV25 model_name 컬럼처럼 "이번 호출에 실제로 어떤
+    모델이 쓰였는지" 사람이 읽는 값에만 쓰인다. 2026-08-31: GPT가 DEV25 공식
+    System B provider로 확정되어 라벨에서 "실험용/비공식" 문구를 뗐다 — 아래
+    구분(gemini 실행이면 그냥 _MODEL, openai 실행이면 별도 라벨)은 "어느 쪽이
+    실제로 호출됐는지"를 여전히 명확히 갈라주기 위해 유지한다."""
+    if AI_PROVIDER == "openai":
+        return f"{_OPENAI_MODEL} (DEV25 공식 System B — GPT, 2026-08-31 확정)"
+    return _MODEL
+
+
+def _active_key_present() -> bool:
+    """AI_PROVIDER가 실제로 쓰는 쪽의 키가 있는지 — api_key_present()(Gemini 전용,
+    공식 준비 상태)와는 별개다. dev25_runner처럼 "지금 이 실행이 진짜 라이브
+    호출인지 mock인지" 안내 문구를 정확히 찍어야 하는 곳에서만 쓴다."""
+    if AI_PROVIDER == "openai":
+        return bool(os.environ.get(_OPENAI_API_KEY_ENV, "").strip())
+    return api_key_present()
 
 
 # ── 결과 자료구조 ───────────────────────────────────────────────────────────
@@ -240,7 +309,12 @@ def clause_hash(clause_text: str) -> str:
 # ── Gemini 호출 ─────────────────────────────────────────────────────────────
 def _cache_path(kind: str, payload: str) -> Path:
     key = hashlib.sha256(_normalize(payload).encode("utf-8")).hexdigest()[:16]
-    return _CACHE_DIR / f"{kind}_{key}.json"
+    # AI_PROVIDER=openai일 때는 파일명에 "_openai_"를 끼워서 캐시 네임스페이스
+    # 자체를 분리한다 — GPT로 뽑은 값이 Gemini 캐시 파일과 이름이 겹칠 수 없으니
+    # "GPT(공식 System B) 결과가 Gemini(참고용) 캐시와 뒤섞이는" 상황이 구조적으로
+    # 불가능하다(기본값 "gemini"일 때는 기존 파일명 그대로라 하위호환 유지).
+    ns = f"{kind}_openai" if AI_PROVIDER == "openai" else kind
+    return _CACHE_DIR / f"{ns}_{key}.json"
 
 
 def _builtin(kind: str, payload: str) -> Optional[Dict[str, Any]]:
@@ -367,13 +441,136 @@ def _call_gemini(prompt: str, schema: Dict[str, Any]) -> Optional[Dict[str, Any]
         return None
 
 
+def _gemini_schema_to_openai_strict(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Gemini의 response_schema(일부 필드만 required)를 OpenAI strict json_schema
+    형식(모든 필드가 required, additionalProperties=false)으로 옮긴다.
+
+    OpenAI strict 모드는 "필수 아닌 필드"라는 개념이 없다 — 대신 required에 전부
+    넣고, 원래 필수가 아니었던 필드는 null도 허용하는 타입으로 바꿔서 "채워도 되고
+    안 채워도 된다"는 의미를 유지한다. 이건 순수한 스키마 표현 변환일 뿐, 실제로
+    어떤 필드가 채워지는지는 여전히 모델(GPT) 응답에 달려있다.
+
+    **재귀적으로 변환한다.** 처음 버전은 최상위 properties만 변환했는데, DEV25 System
+    B의 실제 스키마(_WIDE_SCHEMA)에는 `tiers: {type: array, items: {type: object,
+    properties: {...}}}`처럼 배열 안에 object가 중첩돼 있다. OpenAI strict 모드는
+    "모든" object(중첩된 것 포함)에 additionalProperties=false + 그 object 자신의
+    모든 필드를 required에 넣을 것을 요구한다 — 최상위만 변환하면 중첩된 tiers.items
+    object가 이 조건을 못 만족해서 API가 400 Bad Request로 거부한다(실측: 동학이
+    실제 키로 25문항 돌렸을 때 System B 75건 전부 이 이유로 실패한 것을 발견하고
+    고쳤다)."""
+    def convert_object(obj_schema: Dict[str, Any]) -> Dict[str, Any]:
+        props = obj_schema.get("properties", {})
+        required_original = set(obj_schema.get("required", []))
+        new_props: Dict[str, Any] = {}
+        for name, spec in props.items():
+            new_props[name] = convert_value(spec, nullable=name not in required_original)
+        return {
+            "type": "object",
+            "properties": new_props,
+            "required": list(props.keys()),   # OpenAI strict 모드는 전부 required여야 함
+            "additionalProperties": False,
+        }
+
+    def convert_value(spec: Dict[str, Any], nullable: bool) -> Dict[str, Any]:
+        spec = dict(spec)
+        t = spec.get("type")
+        types = t if isinstance(t, list) else [t]
+        if "object" in types and "properties" in spec:
+            spec = convert_object(spec)
+        elif "array" in types and isinstance(spec.get("items"), dict):
+            # 배열 원소 자체는 "필수 아님"이라는 개념이 없다 — items는 항상 그대로,
+            # 다만 items가 object면 그 내부도 재귀적으로 strict 조건을 채워야 한다.
+            spec["items"] = convert_value(spec["items"], nullable=False)
+        if nullable:
+            cur_type = spec.get("type")
+            if cur_type and "null" not in (cur_type if isinstance(cur_type, list) else [cur_type]):
+                spec["type"] = [cur_type, "null"] if isinstance(cur_type, str) else list(cur_type) + ["null"]
+        return spec
+
+    return convert_object(schema)
+
+
+def _call_openai(prompt: str, schema: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """_call_gemini()와 동일한 계약(실패하면 예외 없이 None, 사유는 _LAST_ERROR에)을
+    지키는 GPT(OpenAI) 버전. SDK 없이 표준 라이브러리 urllib만 쓴다(mvp/gemini_client.py
+    /mvp/openai_client.py와 동일한 방식 — 이 파일만 별도 SDK를 새로 추가하지 않는다).
+
+    2026-08-31 확정: AI_PROVIDER=openai일 때 이 함수가 **DEV25 공식 System B 경로**다
+    (그 전까지는 실험용으로만 취급됐었다). AI_PROVIDER의 기본값은 여전히 "gemini"이므로
+    이 함수는 명시적으로 `AI_PROVIDER=openai`를 지정했을 때만 _invoke()에서 대신
+    불린다 — 아무도 안 건드리면 이 파일의 기존 동작(_call_gemini() 사용)은 그대로다."""
+    global _LAST_ERROR
+    key = os.environ.get(_OPENAI_API_KEY_ENV, "").strip()
+    if not key:
+        _LAST_ERROR = f"{_OPENAI_API_KEY_ENV} 미설정"
+        return None
+    import urllib.request
+    import urllib.error
+    try:
+        body = {
+            "model": _OPENAI_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.0,                           # 재현성. 금융이라 창의성은 해롭다
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "extraction",
+                    "schema": _gemini_schema_to_openai_strict(schema),
+                    "strict": True,
+                },
+            },
+        }
+        req = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = json.loads(resp.read().decode("utf-8"))
+        text = raw["choices"][0]["message"]["content"]
+        data = json.loads(text)
+        _LAST_ERROR = None
+        return data
+    except urllib.error.HTTPError as e:
+        # HTTPError.read()로 응답 본문을 읽어야 OpenAI가 실제로 왜 거부했는지(예:
+        # 스키마 위반 상세 메시지) 남는다 — str(e)만 쓰면 "HTTP Error 400: Bad
+        # Request"처럼 원인을 알 수 없는 문구만 남는다. 이 파일 상단 주석에 적힌
+        # 2026-08-18 Gemini 404 사례("except가 삼키는 바람에 원인이 안 보였다")와
+        # 똑같은 실패 패턴이라 동일한 원칙으로 고친다 — 조용히 삼키지 않는다.
+        try:
+            body = e.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        _LAST_ERROR = f"HTTPError {e.code}: {body[:500] if body else str(e)}"
+        return None
+    except Exception as e:                                # 네트워크·쿼터·모델폐지·파싱 오류
+        _LAST_ERROR = f"{type(e).__name__}: {str(e)[:200]}"
+        return None
+
+
+def _call_ai(prompt: str, schema: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """AI_PROVIDER에 따라 _call_gemini()/_call_openai() 중 하나로 분기한다.
+    기본값은 "gemini" — 아무도 AI_PROVIDER를 안 건드리면 이 함수는 항상
+    _call_gemini()만 부르므로 기존 동작과 100% 동일하다."""
+    if AI_PROVIDER == "openai":
+        return _call_openai(prompt, schema)
+    return _call_gemini(prompt, schema)
+
+
 def _invoke(kind: str, payload: str, prompt: str,
             schema: Dict[str, Any]) -> Tuple[Optional[Dict[str, Any]], str]:
-    """라이브 우선, 실패하면 캐시. 어느 쪽인지 반드시 표시한다."""
-    live = _call_gemini(prompt, schema)
+    """라이브 우선, 실패하면 캐시. 어느 쪽인지 반드시 표시한다.
+
+    EVAL_STRICT=1(공식 평가모드)에서는 예외 — live가 실패하면 사유를 불문하고
+    cache로 대체하지 않는다(SOURCE_RUN_FAILURE로 표시하고 None을 반환). 데모/개발
+    모드(기본값)에서는 지금까지와 동일하게 cache를 안전망으로 쓴다."""
+    live = _call_ai(prompt, schema)
     if live is not None:
         _write_cache(kind, payload, live)
         return live, SOURCE_LIVE
+    if EVAL_STRICT:
+        return None, SOURCE_RUN_FAILURE
     return _read_cache(kind, payload), SOURCE_CACHE
 
 
@@ -440,7 +637,7 @@ def semantic_materiality(before: str, after: str) -> Materiality:
         new_value=data.get("new_value") or None,
         reason=data.get("reason", ""),
         source=source,
-        model=_MODEL if source == SOURCE_LIVE else f"{_MODEL} (캐시)",
+        model=_active_model_name() if source == SOURCE_LIVE else f"{_active_model_name()} (캐시)",
     )
 
 
@@ -508,7 +705,7 @@ def compile_rule(clause_text: str) -> RuleCandidate:
         evidence_span=clause_text.strip(),
         clause_hash=clause_hash(clause_text),
         source=source,
-        model=_MODEL if source == SOURCE_LIVE else f"{_MODEL} (캐시)",
+        model=_active_model_name() if source == SOURCE_LIVE else f"{_active_model_name()} (캐시)",
     )
     cand.gates = run_gates(cand, expected_hash=cand.clause_hash)
     if not cand.all_passed:

@@ -7,7 +7,7 @@
 
 2026-08-27: 박승렬의 체크리스트(유료 API 오기 전 준비 작업)를 반영했습니다 —
 ① DEV25 runner에서 System C가 Gemini를 다시 부르지 않고 System B의 결과를 재사용,
-② cache/checkpoint(`dev25_checkpoint.jsonl`) + 429/5xx/timeout 재시도 정책,
+② cache/checkpoint(`dev25_checkpoint_<provider>.jsonl`, 2026-08-31부터 provider별로 분리) + 429/5xx/timeout 재시도 정책,
 ③ 결과 화면에 D/L/G(실제 원 금액)·Action Reversal 여부 표시,
 ④ 공개 화면에서 `AR_MODE=DEMO` 문구/내부 에러 노출 제거 + fail-closed 처리,
 ⑤ Evidence 링크 클릭 가능화(실제 URL이 있을 때만),
@@ -39,7 +39,7 @@ ablation/
                            #   (Gemini 재호출 없이 B의 결과에 Gate만 적용)
   dev25_runner.py         # A(1회)/B(3회)/C(3회) = 175행 실행기. C는 B의 3회 결과를
                            #   그대로 재사용(_row_from_c)하고 Gemini를 다시 부르지 않음.
-                           #   dev25_checkpoint.jsonl에 문항 단위로 체크포인트 저장 —
+                           #   dev25_checkpoint_<provider>.jsonl에 문항 단위로 체크포인트 저장 —
                            #   중간에 API 오류가 나도 재실행 시 이어서 돈다
                            #   (`python dev25_runner.py --fresh`로 처음부터 새로 가능)
   blind25_samples.json    # CODEX_DEV25_v2.xlsx에서 추출한 25건 원문 (Gold 아님)
@@ -63,6 +63,25 @@ AR_MODE=DEMO python app.py   # http://localhost:8000
 `GEMINI_API_KEY`를 환경변수로 주면 실제 Gemini를 쓰고, 없으면 action_interpreter는
 mock으로, DEV25 System B/C는 정직하게 accepted=N(추출 실패)으로 동작합니다.
 
+**GPT(OpenAI)로 바꾸고 싶다면** — `AI_PROVIDER=openai`와 `OPENAI_API_KEY=<키>`를
+환경변수로 주면 됩니다(`OPENAI_MODEL`은 기본 `gpt-4o-mini`, 바꾸고 싶으면 같이
+지정). `AI_PROVIDER`를 안 주면(기본값) 지금처럼 Gemini를 그대로 씁니다.
+
+```bash
+AI_PROVIDER=openai OPENAI_API_KEY=<키> AR_MODE=DEMO python app.py
+```
+
+**DEV25(`ablation/`, 아래 "DEV25 실행" 절)도 같은 스위치를 씁니다.** 2026-08-31부터
+**이번 대회의 공식 System B provider는 GPT(`AI_PROVIDER=openai`)로 확정**됐습니다
+(그 전까지는 실험용으로만 취급됐었습니다 — Gemini 실행은 이제 참고(reference)
+용도로 유지됩니다). 안 섞이게 세 가지는 여전히 분리돼 있습니다: 캐시 파일명에
+`_openai_`가 붙고(Gemini 캐시와 절대 안 겹침), 결과의 `model_name`에 "DEV25 공식
+System B — GPT"라고 명시되고, checkpoint/산출 파일명도 provider별로 분리됩니다
+(아래 "DEV25 실행" 절 참고). `AI_PROVIDER`를 안 주면 DEV25는 참고용 Gemini 실행이
+됩니다(`mvp/ai_rule.py`의 공식 준비 상태 판정 함수 `api_key_present()`/`live_status()`
+는 이 확정과 무관한 범용 함수라 여전히 `GEMINI_API_KEY`만 봅니다 — 라이브 웹앱의
+의미유의성 판정/규칙 컴파일 파이프라인용).
+
 ## 테스트
 
 ```bash
@@ -72,28 +91,50 @@ for f in tests/*.py; do AR_ROOT=$(pwd) python3 "$f"; done
 95개 전부 통과 (engine 22, ai_rule 23, baseline_regex 30, action_interpreter 8,
 dev25_runner 12).
 
-## DEV25 실행 (실제 또는 키 없음)
+## DEV25 실행 — 공식 System B(GPT) (2026-08-31 확정)
 
 ```bash
-AR_ROOT=$(pwd) python ablation/dev25_runner.py
-# GEMINI_API_KEY 있으면 System B가 실제 Gemini 호출, 없으면 정직하게 accepted=N으로
-# 채워짐(가짜 값을 지어내지 않음) — 로그에 어느 쪽인지 표시됨. System C는 Gemini를
+AR_ROOT=$(pwd) AI_PROVIDER=openai OPENAI_API_KEY=<키> python ablation/dev25_runner.py
+# OPENAI_API_KEY 있으면 System B가 실제 GPT 호출, 없으면 정직하게 accepted=N으로
+# 채워짐(가짜 값을 지어내지 않음) — 로그에 어느 쪽인지 표시됨. System C는 GPT를
 # 다시 부르지 않고 System B의 3회 결과를 그대로 재사용해 Evidence/Schema Gate만
-# 적용함. 결과는 ablation/DEV25_RESULTS.xlsx로 저장됨(매번 재생성, 커밋 안 함).
+# 적용함. 결과는 ablation/DEV25_RESULTS.xlsx(공식 파일명)로 저장됨(매번 재생성,
+# 커밋 안 함). checkpoint는 ablation/dev25_checkpoint_openai.jsonl.
+#
+# 공식 sanity/evaluation 실행에는 EVAL_STRICT=1과 --require-eval-strict를 같이
+# 쓰는 걸 권장한다 — cache fallback이 차단된 상태였다는 증거가 결과물(콘솔 로그 +
+# dev25_run_metadata_openai.json)에 남고, EVAL_STRICT=1이 아니면 아예 시작하지
+# 않는다:
+AR_ROOT=$(pwd) AI_PROVIDER=openai OPENAI_API_KEY=<키> EVAL_STRICT=1 \
+  python ablation/dev25_runner.py --require-eval-strict --fresh
 #
 # 중간에 API 오류가 나서 죽어도 그냥 같은 명령을 다시 실행하면 이어서 돈다 —
-# ablation/dev25_checkpoint.jsonl에 문항×System×run 단위로 이미 끝난 결과가
-# 저장돼 있어서 처음부터 다시 돌 필요가 없다. 완전히 새로 돌리려면:
-AR_ROOT=$(pwd) python ablation/dev25_runner.py --fresh
+# checkpoint에 문항×System×run 단위로 이미 끝난 결과가 저장돼 있어서 처음부터
+# 다시 돌 필요가 없다. 완전히 새로 돌리려면 --fresh를 붙인다.
 ```
 
 결과 행마다 다음 필드가 남는다: `sample_id, system, run_id, model_name, prompt_version,
 raw_output_json, parsed_output_json, schema_valid, accepted, reject_reason, http_status,
 retry_count, latency_ms, error_log, reused_from_run`. `reused_from_run`은 System C 행에만
 채워지며 "이 C 행이 어느 B 실행 결과를 재사용했는지"를 감사 추적하는 용도다(C 행은
-`http_status=None, retry_count=0` — Gemini를 호출한 적이 없다는 뜻). 재시도는
-429/5xx/timeout일 때만 하고(`wide_compiler._is_retryable`), 유효한 응답이 한 번 나오면
-그대로 최종값으로 쓴다 — "답이 마음에 안 든다"는 이유의 재시도는 코드 어디에도 없다.
+`http_status=None, retry_count=0` — API를 호출한 적이 없다는 뜻). 재시도는
+429/5xx/timeout/network일 때만 하고(`wide_compiler._is_retryable`), 유효한 응답이 한 번
+나오면 그대로 최종값으로 쓴다 — "답이 마음에 안 든다"는 이유의 재시도는 코드 어디에도
+없다.
+
+### DEV25를 Gemini로 실행 — 참고(reference)용
+
+```bash
+AR_ROOT=$(pwd) python ablation/dev25_runner.py --fresh
+```
+
+`AI_PROVIDER`를 안 주면(기본값) Gemini로 돈다. checkpoint 파일 자체가 provider별로
+분리돼 있어서(`ablation/dev25_checkpoint_gemini.jsonl` / `ablation/dev25_checkpoint_openai.jsonl`,
+2026-08-31) `--fresh` 없이 이어 돌려도 다른 provider의 캐시 결과가 섞이지 않는다.
+결과는 `ablation/DEV25_RESULTS_GEMINI_REFERENCE.xlsx`(참고용 파일명, 2026-08-31부터
+공식 파일명 `DEV25_RESULTS.xlsx`는 GPT 실행이 씀)에 저장되고, 실행 시작 시 콘솔에
+"참고(reference) 실행 — 공식 System B는 GPT로 확정됐다" 안내가 뜬다. 공식 채점/제출
+자료로는 GPT 실행 결과를 쓴다.
 
 ## Docker / 배포
 

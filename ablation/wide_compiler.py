@@ -203,8 +203,11 @@ def _extract_http_status(err: Optional[str]) -> Optional[int]:
 
 
 def _is_retryable(err: Optional[str]) -> bool:
-    """429/5xx/timeout일 때만 True. 스키마 오류·키 없음 등은 재시도해도 결과가
-    바뀌지 않으므로 False — 여기서 걸러야 불필요한 대기 시간을 안 쓴다."""
+    """429/5xx/timeout/network(연결 자체가 안 된 경우)일 때만 True. 스키마 오류·
+    키 없음·JSON 파싱 실패 등은 재시도해도 결과가 바뀌지 않으므로 False — 여기서
+    걸러야 불필요한 대기 시간을 안 쓴다(2026-08-31: network 오류 탐지를 명시적으로
+    추가 — 예전엔 "timeout"이라는 글자가 없는 연결 실패(DNS/연결거부 등)가
+    재시도 대상에서 조용히 빠졌다)."""
     if not err:
         return False
     if "429" in err or "RESOURCE_EXHAUSTED" in err:
@@ -215,6 +218,13 @@ def _is_retryable(err: Optional[str]) -> bool:
     low = err.lower()
     if "timeout" in low or "timed out" in low or "time out" in low:
         return True
+    _NETWORK_MARKERS = (
+        "urlerror", "connectionerror", "connectionreseterror", "brokenpipeerror",
+        "gaierror", "network", "connection refused", "name or service not known",
+        "temporary failure in name resolution", "unreachable",
+    )
+    if any(marker in low for marker in _NETWORK_MARKERS):
+        return True
     return False
 
 
@@ -224,10 +234,16 @@ def compile_raw(source_text: str, rule_id: Optional[str] = None) -> Tuple[Dict[s
     ai_rule._invoke를 그대로 재사용 — 라이브 우선, 실패하면 캐시, 어느 쪽인지
     source로 표시된다. 키/SDK/캐시가 전부 없으면 (None, "cache")가 돌아온다 —
     이 경우 정직하게 빈 결과 + 실패 사유를 meta에 남긴다(가짜 값으로 채우지 않는다).
-    429/5xx/timeout이면 잠깐 쉬었다가 최대 3번까지 다시 시도한다. 그 외 실패
+    429/5xx/timeout/network면 잠깐 쉬었다가 최대 3번까지 다시 시도한다. 그 외 실패
     (스키마 오류, 키 없음, 파싱 실패 등)는 재시도하지 않고 그대로 실패 처리한다.
     "답이 마음에 안 들어서" 다시 부르는 재시도는 여기 어디에도 없다 — 유효한
     응답이 한 번 오면(=재시도 대상이 아니면) 그걸 그대로 최종값으로 쓴다.
+
+    EVAL_STRICT=1(공식 평가모드, ai_rule.EVAL_STRICT)일 때는 위 "실패하면 캐시"가
+    적용되지 않는다 — live 실패 시 ai_rule._invoke가 캐시를 읽지 않고 그대로 실패를
+    반환하고(source="run_failure"), 이 함수는 그걸 reject_reason에 "RUN_FAILURE
+    (EVAL_STRICT)"로 명시한다. HTTP 200을 받고도 스키마/내용 검증에서 걸러진
+    경우도 EVAL_STRICT에서는 동일하게 RUN_FAILURE로 표시된다.
     """
     t0 = time.time()
     # .format()이 아니라 치환을 쓴다 — 프롬프트 안에 {threshold, effect_value} 같은
@@ -262,18 +278,44 @@ def compile_raw(source_text: str, rule_id: Optional[str] = None) -> Tuple[Dict[s
 
     final_err = ai_rule.last_error() if not ok else None
     http_status = _extract_http_status(final_err)
-    if http_status is None and ok and source == ai_rule.SOURCE_LIVE:
-        http_status = 200  # 실제로 라이브 호출이 성공했을 때만 200으로 표시한다
+    if http_status is None and source == ai_rule.SOURCE_LIVE:
+        # source가 SOURCE_LIVE라는 것 자체가 "HTTP 응답은 정상적으로 받았다"는 뜻이다
+        # (ai_rule._call_ai가 None이 아닌 걸 반환했으므로) — ok가 False라도(=이후
+        # 스키마/내용 검증에서 걸러진 경우) http_status는 정직하게 200으로 남긴다.
+        # "호출이 됐는가"와 "결과를 받아들일 수 있는가"는 별개 질문이라 섞지 않는다.
+        http_status = 200
+
+    if not ok:
+        if ai_rule.EVAL_STRICT:
+            # 2026-08-31: EVAL_STRICT(공식 평가모드)에서는 live 실패든(=source가
+            # SOURCE_RUN_FAILURE) HTTP 200을 받고도 스키마/내용 검증에서 걸러졌든
+            # (=source가 SOURCE_LIVE인데 ok=False) 둘 다 "RUN_FAILURE"로 명시
+            # 표시한다 — 과거 cache로 조용히 대체되지 않았다는 걸 채점 파이프라인이
+            # grep 하나로 구분할 수 있게 한다.
+            reject_reason = f"RUN_FAILURE (EVAL_STRICT): {final_err or '스키마/내용 검증 실패 (추출된 필드 없음)'}"
+        else:
+            reject_reason = final_err or "추출된 필드 없음 (키/캐시 없음)"
+    else:
+        reject_reason = None
 
     meta = {
-        "model_name": ai_rule._MODEL if source == ai_rule.SOURCE_LIVE else f"{ai_rule._MODEL} (캐시/미실행)",
+        # 2026-08-30: ai_rule._MODEL을 직접 쓰지 않는다 — AI_PROVIDER=openai일 때도
+        # 항상 "gemini-..."라고 찍혀서 실제 호출된 provider를 알 수 없게 되는
+        # 라벨링 버그가 되기 때문. ai_rule._active_model_name()이 실제로 어느
+        # provider가 호출됐는지에 맞춰 라벨을 돌려준다(2026-08-31: GPT가 공식
+        # System B provider로 확정되어 openai 분기 라벨은 "DEV25 공식 System B",
+        # gemini 분기는 그대로 _MODEL — 둘을 절대 안 섞이게 구분하는 목적은 동일).
+        "model_name": ai_rule._active_model_name() if source == ai_rule.SOURCE_LIVE
+                      else f"{ai_rule._active_model_name()} (RUN_FAILURE/미실행)"
+                      if source == ai_rule.SOURCE_RUN_FAILURE
+                      else f"{ai_rule._active_model_name()} (캐시/미실행)",
         "prompt_version": f"{PROMPT_VERSION}_{_prompt_hash()}",
         "latency_ms": latency_ms,
         "raw_output_json": data,
         "source": source,
         "schema_valid": schema_valid,
         "accepted": "Y" if ok else "N",
-        "reject_reason": None if ok else (final_err or "추출된 필드 없음 (키/캐시 없음)"),
+        "reject_reason": reject_reason,
         "http_status": http_status,
         "retry_count": retry_count,
         "error_log": error_log,
@@ -314,8 +356,19 @@ __all__ = ["compile_raw", "gate_only", "compile_with_gate", "PROMPT_VERSION"]
 
 
 if __name__ == "__main__":
-    src = ("금리특약 우대조건 - 신용체크카드 결제 실적"
-           "(전전월부터 전월 중 결제실적 100만원 이상) : 연 0.20%")
+    # 2026-08-30: 이 예시는 DEV25 공식 25문항(blind25_samples.json)이나 원장 37행 중
+    # 어디에도 없는 완전히 지어낸 조항이다 — 반드시 그래야 한다. 예전 버전은 U005의
+    # source_bundle_text를 글자 그대로(줄바꿈만 다르게) 여기 썼는데, ai_rule._cache_path
+    # 는 공백을 전부 정규화한 뒤 해시하므로 그 차이가 사라져서 이 자가진단이 U005의
+    # "실제 공식 캐시 슬롯"과 완전히 같은 파일(wide_compile[_openai]_94bb96dd34933d50
+    # .json)을 썼다/읽었다 — 동학이 실제 GPT 키로 25문항을 돌린 뒤 이 자가진단을
+    # 실행했다면 U005의 실측 결과를 조용히 덮어쓰거나, 반대로 자가진단이 매번 자기
+    # 호출 없이 U005의 실측 캐시를 대신 읽어와 "성공"처럼 보이는 거짓 안정성을 줄
+    # 수 있었다(실측 조사 결과 이번엔 아직 덮어써지지 않았음 — U005 캐시 내용은
+    # 실제 DEV25 실행분 그대로였다). 자가진단용 예시는 앞으로도 공식 25문항/원장
+    # 37행과 절대 겹치면 안 된다 — 겹치면 이 문제가 그대로 재발한다.
+    src = ("예시 우대조건 - 모바일뱅킹 첫 로그인 시 우대금리 0.10%p 적용"
+           "(신규 가입자 한정, 자동이체 등록 시 추가 0.05%p)")
     fields, meta = compile_raw(src, rule_id="SELFCHECK")
     print("compile_raw:", fields)
     print("meta:", {k: v for k, v in meta.items() if k != "raw_output_json"})

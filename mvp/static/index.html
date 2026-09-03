@@ -310,8 +310,8 @@ document.getElementById('evaluateBtn').onclick = async () => {
 
   // 11. TTB / TTR
   html += `<div class="subhead">11. Time-to-Breach / Time-to-Reversal</div><div class="stat-grid">`;
-  html += statCard('TTB (구간 이탈 시점)', fmtMonth(time.TTB));
-  html += statCard('TTR (실제 위반 시점)', fmtMonth(time.TTR));
+  html += statCard('TTB (우대 조건이 깨지는 시점)', fmtMonth(time.TTB));
+  html += statCard('TTR (누적 전체효과가 손해로 전환되는 시점)', fmtMonth(time.TTR));
   html += `</div>`;
 
   if (data.matched_rules) {

@@ -167,8 +167,16 @@ class StrongRegexBaseline:
 # ==========================================
 
 def _selfcheck() -> None:
-    src = ("금리특약 우대조건 - 신용체크카드 결제 실적"
-           "(전전월부터 전월 중 결제실적 100만원 이상) : 연 0.20%")
+    # 2026-08-31: 이 예시는 DEV25 공식 25문항(blind25_samples.json)이나 원장 37행
+    # 어디에도 없는 합성 조항이다. 예전 버전은 U005의 source_bundle_text를 글자
+    # 그대로 여기 썼는데 — 이 self-check은 ai_rule._invoke/cache를 전혀 거치지
+    # 않는 순수 결정론적 함수(EvidenceGate.verify/StrongRegexBaseline.extract)만
+    # 검증하므로 wide_compiler.py 자가진단 때와 달리 캐시 오염 위험은 없었다(현재
+    # GPT 75회 결과와는 무관). 다만 공식 벤치마크 원문을 테스트 픽스처에 그대로
+    # 박아두면 Freeze 패키지 위생상 좋지 않아 합성 예시로 교체한다. 숫자 구조
+    # (100만원 이상 / 연 0.20%)는 아래 단언들이 그대로 통과하도록 유지했다.
+    src = ("금리특약 우대조건 - 자동이체 등록 실적"
+           "(최근 3개월 이체금액 100만원 이상) : 연 0.20%")
 
     assert EvidenceGate.verify({"effect_value": "0.20"}, src)["accepted"] is True
     for fake in ("0.90", "0.10", "0.55", "0.99"):

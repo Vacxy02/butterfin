@@ -13,10 +13,42 @@ import re
 from typing import Optional, Dict, Any, Tuple
 
 from schemas import TypedActionDelta, ACTION_TYPES
-from gemini_client import call_gemini_json, has_api_key, GeminiError
+from gemini_client import call_gemini_json, has_api_key as _gemini_has_key, GeminiError
+from openai_client import call_openai_json, has_api_key as _openai_has_key, OpenAIError
 from rule_store import RuleStore
 
 PROMPT_VERSION = "action_interpreter_v1_2026-08-25"
+
+# ---------------------------------------------------------------------------
+# AI 제공자 선택 (2026-08-30 추가) — "GEMINI_API_KEY 대신 GPT API로 바꾸면 쉬운가"
+# 질문에 대한 답으로, 라이브 데모(이 파일의 문장 해석)만 Gemini/GPT를 골라 쓸 수
+# 있게 했다. 기본값은 그대로 "gemini"라서, AI_PROVIDER를 아무도 안 건드리면 기존
+# 배포는 동작이 한 글자도 안 바뀐다. DEV25 System B/C(ablation/wide_compiler.py →
+# mvp/ai_rule.py)는 여기 포함하지 않는다 — 그 B 프롬프트는 이미 Gemini 기준으로
+# 팀이 확정한 것이라, 박승렬 확인 없이는 손대지 않는다(위 openai_client.py 상단
+# 주석과 동일한 이유).
+# ---------------------------------------------------------------------------
+AI_PROVIDER = os.environ.get("AI_PROVIDER", "gemini").strip().lower()
+
+
+def _ai_has_key() -> bool:
+    return _openai_has_key() if AI_PROVIDER == "openai" else _gemini_has_key()
+
+
+def _ai_call(system_prompt: str, text: str) -> Dict[str, Any]:
+    """provider에 맞는 함수를 부르고, 둘 다 { "parsed", "raw_text", "model",
+    "latency_ms" } 같은 모양을 돌려주므로 호출부는 어느 provider인지 신경 안 써도 된다.
+    실패 시 GeminiError/OpenAIError 중 실제로 호출한 쪽의 예외가 그대로 올라간다 —
+    interpret()이 둘 다 한꺼번에 잡는다."""
+    if AI_PROVIDER == "openai":
+        return call_openai_json(system_prompt, text)
+    return call_gemini_json(system_prompt, text)
+
+
+def _ai_model_name() -> str:
+    if AI_PROVIDER == "openai":
+        return os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+    return os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 
 # ---------------------------------------------------------------------------
 # 은행/상품명 감지 (2026-08-28 추가)
@@ -199,7 +231,7 @@ def interpret(text: str, force_mock: bool = False) -> Tuple[TypedActionDelta, Di
     inst = _detect_institution(text)
     prod = _detect_product(text)
 
-    if force_mock or not has_api_key():
+    if force_mock or not _ai_has_key():
         raw = _mock_interpret(text)
         raw = _double_check(raw)
         delta = TypedActionDelta(status=raw["status"], action_type=raw.get("action_type"),
@@ -207,20 +239,20 @@ def interpret(text: str, force_mock: bool = False) -> Tuple[TypedActionDelta, Di
                                   amount_monthly=raw.get("amount_monthly"), raw_text=text,
                                   clarifying_question=raw.get("clarifying_question"),
                                   institution=inst, product=prod)
-        return delta, {"model_name": "mock-not-gemini", "prompt_version": PROMPT_VERSION}
+        return delta, {"model_name": f"mock-not-{AI_PROVIDER}", "prompt_version": PROMPT_VERSION}
 
     try:
-        result = call_gemini_json(SYSTEM_PROMPT, text)
-    except GeminiError as e:
-        # fail-closed: Gemini 호출이 실패해도 500으로 죽지 않고 NEED_INFO로 넘겨서
-        # 사람이 2번 항목에서 행동 유형/금액을 직접 입력하는 수동 경로로 이어지게 한다.
-        # 원문 예외 메시지(예: "HTTP Error 429: ...")는 내부 사정이라 공개 화면에 그대로
-        # 보여주지 않는다 — 서버 쪽 meta["error"]에만 남겨서 로그/디버깅에 쓴다.
+        result = _ai_call(SYSTEM_PROMPT, text)
+    except (GeminiError, OpenAIError) as e:
+        # fail-closed: AI 호출이 실패해도(Gemini든 GPT든) 500으로 죽지 않고 NEED_INFO로
+        # 넘겨서 사람이 2번 항목에서 행동 유형/금액을 직접 입력하는 수동 경로로 이어지게
+        # 한다. 원문 예외 메시지(예: "HTTP Error 429: ...")는 내부 사정이라 공개 화면에
+        # 그대로 보여주지 않는다 — 서버 쪽 meta["error"]에만 남겨서 로그/디버깅에 쓴다.
         delta = TypedActionDelta(
             status="NEED_INFO", raw_text=text, institution=inst, product=prod,
             clarifying_question="자동 해석에 실패했습니다. 아래 2번 항목에서 행동 유형과 금액을 직접 선택해 주세요.",
         )
-        return delta, {"model_name": os.environ.get("GEMINI_MODEL", "gemini-2.0-flash"),
+        return delta, {"model_name": _ai_model_name(),
                         "prompt_version": PROMPT_VERSION, "error": str(e)}
 
     raw = _double_check(result["parsed"])
