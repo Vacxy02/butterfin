@@ -84,6 +84,25 @@
   #resultCard { box-shadow:var(--shadow-md); }
   #resultCard #decisionBadge { margin-bottom:2px; }
 
+  /* Safe Zone 그래프 — 숫자표(3~6번 stat-grid)는 그대로 아래 남겨두고, 그 값을
+     한 눈에 보이는 막대로 요약해서 보여준다(현재 계획 금액이 Nominal Safe Limit
+     대비 어디 있는지). */
+  .zonebar-wrap { margin:14px 0 6px; }
+  .zonebar-current { position:relative; height:18px; }
+  .zonebar-current b { position:absolute; transform:translateX(-50%); font-family:var(--mono);
+    font-size:12.5px; font-weight:700; color:var(--ink); white-space:nowrap; }
+  .zonebar-track-wrap { position:relative; }
+  .zonebar-track { height:14px; border-radius:7px; overflow:hidden; display:flex; }
+  .zonebar-safe { background:var(--good); }
+  .zonebar-risk { background:var(--crit); }
+  .zonebar-marker { position:absolute; top:-4px; bottom:-4px; width:2px; background:var(--ink); }
+  .zonebar-scale { position:relative; height:16px; margin-top:6px; font-family:var(--mono);
+    font-size:10.5px; color:var(--ink-3); }
+  .zonebar-scale span { position:absolute; white-space:nowrap; }
+  .zonebar-scale .zs-min { left:0; }
+  .zonebar-scale .zs-max { right:0; }
+  .zonebar-scale .zs-limit { transform:translateX(-50%); }
+
   /* 2026-09-04: 다크모드 자동 전환을 껐다 — 시스템 설정과 무관하게 항상 흰 배경으로
      고정한다(요청: "다시 흰배경으로 바꾸자"). 위 :root 라이트 팔레트가 유일한 팔레트다. */
 </style>
@@ -274,6 +293,36 @@ function fmtRange(min, max) {
   return `${fmtWonPlain(min)} ~ ${fmtWonPlain(max)}`;
 }
 
+// Safe Zone 위치 막대 — 3~6번 숫자표와 같은 값(nominal_safe_limit, 계획 금액)을
+// 그대로 옮겨서 그리기만 한다. 새로 계산하지 않는다. 금액 기반 유형이 아니거나
+// (isDiscreteType) 값이 없으면 아예 그리지 않는다(추측 눈금 안 만듦).
+function safeZoneBarHtml(current, limit) {
+  if (current === null || current === undefined || limit === null || limit === undefined) return '';
+  const base = Math.max(current, limit, 1);
+  const scaleMax = Math.ceil((base * 1.2) / 10000) * 10000;
+  const limitPct = Math.min(100, Math.max(0, (limit / scaleMax) * 100));
+  const curPct = Math.min(100, Math.max(0, (current / scaleMax) * 100));
+  const curLabelPct = Math.min(92, Math.max(8, curPct));
+  const limitLabelPct = Math.min(85, Math.max(15, limitPct));
+  return `
+    <div class="zonebar-wrap">
+      <div class="subhead" style="margin-top:0;">SAFE ZONE · 현재 위치</div>
+      <div class="zonebar-current"><b style="left:${curLabelPct}%">현재 ${current.toLocaleString()}원</b></div>
+      <div class="zonebar-track-wrap">
+        <div class="zonebar-track">
+          <div class="zonebar-safe" style="width:${limitPct}%"></div>
+          <div class="zonebar-risk" style="width:${100 - limitPct}%"></div>
+        </div>
+        <div class="zonebar-marker" style="left:${curPct}%"></div>
+      </div>
+      <div class="zonebar-scale">
+        <span class="zs-min">0</span>
+        <span class="zs-limit" style="left:${limitLabelPct}%">Nominal Safe Limit ${limit.toLocaleString()}원</span>
+        <span class="zs-max">${scaleMax.toLocaleString()}원</span>
+      </div>
+    </div>`;
+}
+
 // FIX-1(02_FIX_1차원SafeZone_4개.md): "불확실성 정보 없음 → nominal과 동일" 정책을
 // 채택했다 — robust_safe_limit은 이미 nominal과 같은 값으로 계산돼 있으므로(엔진이
 // 임의 버퍼를 만들지 않음), 화면 문구도 "계산 안 함"이라고 하지 않는다. 숫자 범위와
@@ -345,6 +394,10 @@ document.getElementById('evaluateBtn').onclick = async () => {
 
   if (isDiscreteType) {
     html += `<div class="note">이 행동 유형(해지/계좌변경 등)은 1차원 연속 금액 모델을 쓰지 않아 Safe Zone/Financial Cliff 개념이 적용되지 않습니다 — 아래 3~8번은 모두 해당 없음으로 표시됩니다.</div>`;
+  } else {
+    // 아래 3~6번 숫자표와 같은 값을 그대로 그래프로도 보여준다(계획 금액이
+    // Nominal Safe Limit 대비 어디 있는지 한눈에 확인).
+    html += safeZoneBarHtml(data.action ? data.action.amount : null, safety.nominal_safe_limit);
   }
 
   // 3. Robust Safe Zone
