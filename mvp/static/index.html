@@ -84,25 +84,6 @@
   #resultCard { box-shadow:var(--shadow-md); }
   #resultCard #decisionBadge { margin-bottom:2px; }
 
-  /* Safe Zone 그래프 — 숫자표(3~6번 stat-grid)는 그대로 아래 남겨두고, 그 값을
-     한 눈에 보이는 막대로 요약해서 보여준다(현재 계획 금액이 Nominal Safe Limit
-     대비 어디 있는지). */
-  .zonebar-wrap { margin:14px 0 6px; }
-  .zonebar-current { position:relative; height:18px; }
-  .zonebar-current b { position:absolute; transform:translateX(-50%); font-family:var(--mono);
-    font-size:12.5px; font-weight:700; color:var(--ink); white-space:nowrap; }
-  .zonebar-track-wrap { position:relative; }
-  .zonebar-track { height:14px; border-radius:7px; overflow:hidden; display:flex; }
-  .zonebar-safe { background:var(--good); }
-  .zonebar-risk { background:var(--crit); }
-  .zonebar-marker { position:absolute; top:-4px; bottom:-4px; width:2px; background:var(--ink); }
-  .zonebar-scale { position:relative; height:16px; margin-top:6px; font-family:var(--mono);
-    font-size:10.5px; color:var(--ink-3); }
-  .zonebar-scale span { position:absolute; white-space:nowrap; }
-  .zonebar-scale .zs-min { left:0; }
-  .zonebar-scale .zs-max { right:0; }
-  .zonebar-scale .zs-limit { transform:translateX(-50%); }
-
   /* 2026-09-04: 다크모드 자동 전환을 껐다 — 시스템 설정과 무관하게 항상 흰 배경으로
      고정한다(요청: "다시 흰배경으로 바꾸자"). 위 :root 라이트 팔레트가 유일한 팔레트다. */
 </style>
@@ -301,36 +282,6 @@ function fmtRange(min, max) {
   return `${fmtWonPlain(min)} ~ ${fmtWonPlain(max)}`;
 }
 
-// Safe Zone 위치 막대 — 3~6번 숫자표와 같은 값(nominal_safe_limit, 계획 금액)을
-// 그대로 옮겨서 그리기만 한다. 새로 계산하지 않는다. 금액 기반 유형이 아니거나
-// (isDiscreteType) 값이 없으면 아예 그리지 않는다(추측 눈금 안 만듦).
-function safeZoneBarHtml(current, limit) {
-  if (current === null || current === undefined || limit === null || limit === undefined) return '';
-  const base = Math.max(current, limit, 1);
-  const scaleMax = Math.ceil((base * 1.2) / 10000) * 10000;
-  const limitPct = Math.min(100, Math.max(0, (limit / scaleMax) * 100));
-  const curPct = Math.min(100, Math.max(0, (current / scaleMax) * 100));
-  const curLabelPct = Math.min(92, Math.max(8, curPct));
-  const limitLabelPct = Math.min(85, Math.max(15, limitPct));
-  return `
-    <div class="zonebar-wrap">
-      <div class="subhead" style="margin-top:0;">SAFE ZONE · 현재 위치</div>
-      <div class="zonebar-current"><b style="left:${curLabelPct}%">현재 ${current.toLocaleString()}원</b></div>
-      <div class="zonebar-track-wrap">
-        <div class="zonebar-track">
-          <div class="zonebar-safe" style="width:${limitPct}%"></div>
-          <div class="zonebar-risk" style="width:${100 - limitPct}%"></div>
-        </div>
-        <div class="zonebar-marker" style="left:${curPct}%"></div>
-      </div>
-      <div class="zonebar-scale">
-        <span class="zs-min">0</span>
-        <span class="zs-limit" style="left:${limitLabelPct}%">Nominal Safe Limit ${limit.toLocaleString()}원</span>
-        <span class="zs-max">${scaleMax.toLocaleString()}원</span>
-      </div>
-    </div>`;
-}
-
 // FIX-1(02_FIX_1차원SafeZone_4개.md): "불확실성 정보 없음 → nominal과 동일" 정책을
 // 채택했다 — robust_safe_limit은 이미 nominal과 같은 값으로 계산돼 있으므로(엔진이
 // 임의 버퍼를 만들지 않음), 화면 문구도 "계산 안 함"이라고 하지 않는다. 숫자 범위와
@@ -401,33 +352,31 @@ document.getElementById('evaluateBtn').onclick = async () => {
   html += `</div>`;
 
   if (isDiscreteType) {
-    html += `<div class="note">이 행동 유형(해지/계좌변경 등)은 1차원 연속 금액 모델을 쓰지 않아 Safe Zone/Financial Cliff 개념이 적용되지 않습니다 — 아래 3~8번은 모두 해당 없음으로 표시됩니다.</div>`;
-  } else {
-    // 아래 3~6번 숫자표와 같은 값을 그대로 그래프로도 보여준다(계획 금액이
-    // Nominal Safe Limit 대비 어디 있는지 한눈에 확인).
-    html += safeZoneBarHtml(data.action ? data.action.amount : null, safety.nominal_safe_limit);
+    html += `<div class="note">이 행동 유형(해지/계좌변경 등)은 1차원 연속 금액 모델을 쓰지 않아 Safe Zone/Financial Cliff 개념이 적용되지 않습니다 — 금액 기반 항목(3~5, 8번)은 아래에서 생략하고, 이 유형에서 실제로 의미 있는 항목(6~7, 9~12번)만 보여드립니다.</div>`;
   }
 
-  // 3. Robust Safe Zone
-  html += `<div class="subhead">3. Robust Safe Zone</div><div class="stat-grid">`;
-  html += statCard('범위', fmtRange(safety.robust_safe_zone ? safety.robust_safe_zone.min : null, safety.robust_safe_zone ? safety.robust_safe_zone.max : null));
-  html += statCard('상태', ROBUST_STATUS_LABEL[safety.robust_status] || safety.robust_status || '확인 필요');
-  html += `</div>`;
-  if (safety.robust_status === 'NOT_APPLICABLE') {
-    html += `<div class="note">위 범위는 Robust 기준으로 새로 계산된 값이 아니라, Nominal Safe Zone과 동일한 값을 그대로 보여준 것입니다.</div>`;
+  if (!isDiscreteType) {
+    // 3. Robust Safe Zone
+    html += `<div class="subhead">3. Robust Safe Zone</div><div class="stat-grid">`;
+    html += statCard('범위', fmtRange(safety.robust_safe_zone ? safety.robust_safe_zone.min : null, safety.robust_safe_zone ? safety.robust_safe_zone.max : null));
+    html += statCard('상태', ROBUST_STATUS_LABEL[safety.robust_status] || safety.robust_status || '확인 필요');
+    html += `</div>`;
+    if (safety.robust_status === 'NOT_APPLICABLE') {
+      html += `<div class="note">위 범위는 Robust 기준으로 새로 계산된 값이 아니라, Nominal Safe Zone과 동일한 값을 그대로 보여준 것입니다.</div>`;
+    }
+
+    // 4. Warning Zone — FIX-2: robust==nominal(공집합)이면 숫자 구간 대신 "해당 없음"만 보여준다.
+    html += `<div class="subhead">4. Warning Zone</div><div class="stat-grid">`;
+    const wz = safety.warning_zone || {};
+    const warningLabel = WARNING_STATUS_LABEL[safety.warning_status];
+    html += statCard('범위 (초과 ~ 이하)', warningLabel || fmtRange(wz.min_exclusive, wz.max_inclusive));
+    html += `</div>`;
+
+    // 5. Nominal Safe Limit
+    html += `<div class="subhead">5. Nominal Safe Limit</div><div class="stat-grid">`;
+    html += statCard('한도', safety.nominal_safe_limit !== null && safety.nominal_safe_limit !== undefined ? fmtWonPlain(safety.nominal_safe_limit) + '/월' : '확인 필요');
+    html += `</div>`;
   }
-
-  // 4. Warning Zone — FIX-2: robust==nominal(공집합)이면 숫자 구간 대신 "해당 없음"만 보여준다.
-  html += `<div class="subhead">4. Warning Zone</div><div class="stat-grid">`;
-  const wz = safety.warning_zone || {};
-  const warningLabel = WARNING_STATUS_LABEL[safety.warning_status];
-  html += statCard('범위 (초과 ~ 이하)', warningLabel || fmtRange(wz.min_exclusive, wz.max_inclusive));
-  html += `</div>`;
-
-  // 5. Nominal Safe Limit
-  html += `<div class="subhead">5. Nominal Safe Limit</div><div class="stat-grid">`;
-  html += statCard('한도', safety.nominal_safe_limit !== null && safety.nominal_safe_limit !== undefined ? fmtWonPlain(safety.nominal_safe_limit) + '/월' : '확인 필요');
-  html += `</div>`;
 
   // 6. 현재 행동 위치
   html += `<div class="subhead">6. 현재 행동 위치</div><div class="stat-grid">`;
@@ -441,11 +390,14 @@ document.getElementById('evaluateBtn').onclick = async () => {
 
   // 8. Financial Cliff — FIX-3: 항상 horizon_months(12개월) 누적 기준. 아래 9번(D/L/G)의
   // 기준 시점(TTR/TTB, 12개월보다 이를 수 있음)과 다를 수 있다는 걸 단위와 함께 명시한다.
+  // 이산 판정 유형(해지/계좌변경)은 애초에 불연속 지점 개념이 없어 이 섹션 자체를 생략한다.
   const cliff = safety.financial_cliff;  // {value, unit, horizon_months} | null
-  html += `<div class="subhead">8. Financial Cliff</div><div class="stat-grid">`;
-  html += statCard('불연속 크기 (경계 넘을 때 손익 점프)', cliff ? `${fmtWon(cliff.value)} (${cliff.horizon_months}개월 누적 기준)` : (CLIFF_STATUS_LABEL[safety.cliff_status] || '확인 필요'));
-  html += statCard('상태', CLIFF_STATUS_LABEL[safety.cliff_status] || safety.cliff_status || '확인 필요');
-  html += `</div>`;
+  if (!isDiscreteType) {
+    html += `<div class="subhead">8. Financial Cliff</div><div class="stat-grid">`;
+    html += statCard('불연속 크기 (경계 넘을 때 손익 점프)', cliff ? `${fmtWon(cliff.value)} (${cliff.horizon_months}개월 누적 기준)` : (CLIFF_STATUS_LABEL[safety.cliff_status] || '확인 필요'));
+    html += statCard('상태', CLIFF_STATUS_LABEL[safety.cliff_status] || safety.cliff_status || '확인 필요');
+    html += `</div>`;
+  }
 
   // 9. D / L / G — FIX-3: 각 값이 몇 개월 시점 누적인지(horizon_months) 함께 보여준다.
   // 이 시점은 8번 Financial Cliff의 12개월과 다를 수 있다(TTR/TTB가 12개월보다 이르면
