@@ -45,6 +45,12 @@ class TypedActionDelta:
     # 상품을 여러 은행이 취급할 수 있음) — 그래서 상품명도 institution과 똑같은
     # 방식(_detect_product(), 실제 등록된 product 목록과 대조)으로 독립적으로 채운다.
     product: Optional[str] = None
+    # 2026-09-04 추가: 문장에 "이 행동으로 즉시 얻는 이득(캐시백 등)"이 금액과 함께
+    # 명시돼 있으면 그 값을 담는다. amount_monthly(행동 자체의 금액)와는 완전히 다른
+    # 개념이라 별도 필드로 분리한다 — action_interpreter.SYSTEM_PROMPT가 이 둘을
+    # 구분해서 뽑도록 지시한다. 문장에 없으면 None이며, 화면(카드 2)은 이 값이 None이면
+    # 기존처럼 0을 기본값으로 두고 사용자가 직접 입력하게 한다(추측해서 채우지 않음).
+    direct_benefit_monthly: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

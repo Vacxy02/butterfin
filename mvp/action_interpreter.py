@@ -17,7 +17,7 @@ from gemini_client import call_gemini_json, has_api_key as _gemini_has_key, Gemi
 from openai_client import call_openai_json, has_api_key as _openai_has_key, OpenAIError
 from rule_store import RuleStore
 
-PROMPT_VERSION = "action_interpreter_v1_2026-08-25"
+PROMPT_VERSION = "action_interpreter_v2_2026-09-04"
 
 # ---------------------------------------------------------------------------
 # AI 제공자 선택 (2026-08-30 추가) — "GEMINI_API_KEY 대신 GPT API로 바꾸면 쉬운가"
@@ -167,7 +167,22 @@ SYSTEM_PROMPT = f"""너는 사용자의 한국어 문장을 아래 4가지 행�
 
 JSON만 출력한다: {{"status": "OK"|"NEED_INFO"|"UNSUPPORTED",
 "action_type": 유형 또는 null, "target_metric": 문자열 또는 null,
-"amount_monthly": 숫자 또는 null, "clarifying_question": 문자열 또는 null}}
+"amount_monthly": 숫자 또는 null, "direct_benefit_monthly": 숫자 또는 null,
+"clarifying_question": 문자열 또는 null}}
+
+이 문장에는 서로 다른 두 종류의 금액이 나올 수 있다 — 절대 섞지 않는다.
+- amount_monthly: 오직 행동 그 자체의 월간 규모(예: 매달 다른 카드로 옮기는 카드 실적
+  금액)만을 가리킨다.
+- direct_benefit_monthly: 그 행동을 함으로써 "즉시/바로" 얻는 부수적인 이득 — 캐시백·
+  리워드·이자 등. 문장에서 "직접효과", "직접이득", "즉시 얻는 이득" 같은 표현과 함께
+  나오는 금액이 보통 이것이다. 문장에 이 이득이 명시적으로 없으면 null로 둔다 —
+  추측해서 만들어내지 않는다.
+- 두 금액이 한 문장에 같이 나와도 서로 자리를 바꾸지 않는다. 행동 금액은 amount_monthly,
+  이득 금액은 direct_benefit_monthly에만 넣는다.
+- 문장에 금액이 여러 개인데 어느 것이 "행동 자체의 금액"인지 구분이 안 되면, 추측하지
+  말고 status="NEED_INFO"로 하고 clarifying_question에 되물을 질문을 쓴다.
+예시: "다음 달부터 카드사용 5만원을 다른 카드로 옮길 거야. 이 행동으로 매달 3000원의
+캐시백 직접효과를 얻어." → amount_monthly=50000, direct_benefit_monthly=3000.
 
 규칙:
 - 금액/유형이 불명확하면 status="NEED_INFO"로 하고 clarifying_question에 되물을 질문을 쓴다.
@@ -177,37 +192,49 @@ JSON만 출력한다: {{"status": "OK"|"NEED_INFO"|"UNSUPPORTED",
 """
 
 
+def _mock_direct_benefit(t: str) -> Optional[int]:
+    """키워드(직접효과/직접이득/즉시 이득/캐시백) 근처에 나오는 금액만 direct_benefit로
+    뽑는다 — amount_monthly용 "숫자+만원" 정규식과는 완전히 분리된 별도 패턴이라
+    서로 헷갈리지 않는다. 못 찾으면 None(추측하지 않음)."""
+    kw = r"(?:직접\s*(?:이득|효과)|즉시[^\d]{0,10}이득|캐시백)"
+    m = re.search(kw + r"[^\d]{0,12}(\d[\d,]*)\s*원", t) or re.search(r"(\d[\d,]*)\s*원[^\d]{0,12}" + kw, t)
+    return int(m.group(1).replace(",", "")) if m else None
+
+
 def _mock_interpret(text: str) -> Dict[str, Any]:
     """키워드 기반 mock. 실제 Gemini 언어이해를 대표하지 않는다 — 파이프라인 검증용."""
     t = text or ""
     amount_m = re.search(r"(\d[\d,]*)\s*만\s*원", t)
     amount = int(amount_m.group(1).replace(",", "")) * 10_000 if amount_m else None
+    db = _mock_direct_benefit(t)
 
     if "해지" in t and ("청약" in t or "적금" in t or "예금" in t):
         return {"status": "OK", "action_type": "PRODUCT_TERMINATION",
                 "target_metric": "product_hold_status", "amount_monthly": None,
-                "clarifying_question": None}
+                "direct_benefit_monthly": db, "clarifying_question": None}
     if ("카드" in t) and ("옮" in t or "이동" in t or "다른" in t):
         if amount is None:
             return {"status": "NEED_INFO", "action_type": "CARD_SPEND_SHIFT",
                      "target_metric": "rolling_3m_card_spend", "amount_monthly": None,
+                     "direct_benefit_monthly": db,
                      "clarifying_question": "매달 얼마를 다른 카드로 옮기실 건가요?"}
         return {"status": "OK", "action_type": "CARD_SPEND_SHIFT",
                  "target_metric": "rolling_3m_card_spend", "amount_monthly": amount,
-                 "clarifying_question": None}
+                 "direct_benefit_monthly": db, "clarifying_question": None}
     if "결제계좌" in t or ("계좌" in t and "변경" in t):
         return {"status": "OK", "action_type": "PAYMENT_ACCOUNT_CHANGE",
                  "target_metric": "attribution_account", "amount_monthly": None,
-                 "clarifying_question": None}
+                 "direct_benefit_monthly": db, "clarifying_question": None}
     if "급여" in t and ("계좌" in t or "이체" in t):
         return {"status": "OK", "action_type": "SALARY_ACCOUNT_CHANGE",
                  "target_metric": "salary_account", "amount_monthly": None,
-                 "clarifying_question": None}
+                 "direct_benefit_monthly": db, "clarifying_question": None}
     if not t.strip():
         return {"status": "NEED_INFO", "action_type": None, "target_metric": None,
-                 "amount_monthly": None, "clarifying_question": "어떤 행동을 하려고 하시는지 알려주세요."}
+                 "amount_monthly": None, "direct_benefit_monthly": None,
+                 "clarifying_question": "어떤 행동을 하려고 하시는지 알려주세요."}
     return {"status": "UNSUPPORTED", "action_type": None, "target_metric": None,
-             "amount_monthly": None, "clarifying_question": None}
+             "amount_monthly": None, "direct_benefit_monthly": None, "clarifying_question": None}
 
 
 def _double_check(d: Dict[str, Any]) -> Dict[str, Any]:
@@ -238,7 +265,8 @@ def interpret(text: str, force_mock: bool = False) -> Tuple[TypedActionDelta, Di
                                   target_metric=raw.get("target_metric"),
                                   amount_monthly=raw.get("amount_monthly"), raw_text=text,
                                   clarifying_question=raw.get("clarifying_question"),
-                                  institution=inst, product=prod)
+                                  institution=inst, product=prod,
+                                  direct_benefit_monthly=raw.get("direct_benefit_monthly"))
         return delta, {"model_name": f"mock-not-{AI_PROVIDER}", "prompt_version": PROMPT_VERSION}
 
     try:
@@ -260,6 +288,7 @@ def interpret(text: str, force_mock: bool = False) -> Tuple[TypedActionDelta, Di
                               target_metric=raw.get("target_metric"),
                               amount_monthly=raw.get("amount_monthly"), raw_text=text,
                               clarifying_question=raw.get("clarifying_question"),
-                              institution=inst, product=prod)
+                              institution=inst, product=prod,
+                              direct_benefit_monthly=raw.get("direct_benefit_monthly"))
     return delta, {"model_name": result["model"], "prompt_version": PROMPT_VERSION,
                     "latency_ms": result["latency_ms"]}

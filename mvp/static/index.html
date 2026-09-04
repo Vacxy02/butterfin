@@ -127,10 +127,18 @@ document.getElementById('interpretBtn').onclick = async () => {
     // clarifying_question처럼 사람이 읽을 수 있게 준비된 문구만 보여준다.
     const shown = d.action_type || d.clarifying_question || (d.status === 'UNSUPPORTED' ? '지원하지 않는 행동 유형입니다.' : '');
     const foundBits = [d.institution, d.product].filter(Boolean).join(' · ');
-    box.innerHTML = `<div class="interpret-box ${d.status}"><b>${d.status}</b> — ${shown}${d.amount_monthly ? ' · ' + d.amount_monthly.toLocaleString() + '원' : ''}${foundBits ? ' · [' + foundBits + '] 인식됨' : ''}</div>`;
+    const dbBit = d.direct_benefit_monthly ? ' · 직접이득 ' + d.direct_benefit_monthly.toLocaleString() + '원 인식됨' : '';
+    box.innerHTML = `<div class="interpret-box ${d.status}"><b>${d.status}</b> — ${shown}${d.amount_monthly ? ' · ' + d.amount_monthly.toLocaleString() + '원' : ''}${foundBits ? ' · [' + foundBits + '] 인식됨' : ''}${dbBit}</div>`;
     if (d.status === 'OK' || d.status === 'NEED_INFO') {
       if (d.action_type) document.getElementById('actionType').value = d.action_type;
       if (d.amount_monthly) document.getElementById('amount').value = d.amount_monthly;
+      // 2026-09-04 추가: 문장에 "직접효과/즉시 이득"이 금액과 함께 명시돼 있으면 그
+      // 값으로 카드 2의 직접 이득 입력창을 채운다. 문장에 없으면(null) 손대지 않는다 —
+      // 기존 값(기본 0 또는 사용자가 이미 입력해둔 값)을 그대로 둔다. amount_monthly와
+      // 마찬가지로 사용자가 카드 2에서 그대로 확인·수정할 수 있다.
+      if (d.direct_benefit_monthly !== null && d.direct_benefit_monthly !== undefined) {
+        document.getElementById('directBenefit').value = d.direct_benefit_monthly;
+      }
       // 문장에 등록된 은행명/상품명이 언급됐으면(예: "신협 카드로 옮길 거야", "디딤돌대출
       // 해지하려고") 두 드롭다운을 각각 독립적으로 자동 선택한다 — 은행명만으로는
       // 상품이 안 좁혀질 수 있어서 하나가 다른 하나를 대신하지 않는다. 옵션에 없는
