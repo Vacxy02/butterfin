@@ -2,54 +2,120 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>금융행동 사전검증 — Action Reversal</title>
 <style>
-  :root { --bg:#F4F6F4; --surface:#FFFFFF; --ink:#131714; --ink-2:#4A544E; --line:#DCE1DD;
-    --accent:#1F4D3F; --crit:#8C2F2A; --crit-sf:#F7E8E6; --warn:#7A5A12; --warn-sf:#F6EFDC;
-    --good-sf:#E4EEE8; --mono:ui-monospace,Consolas,"D2Coding",monospace; }
+  @import url('https://fonts.googleapis.com/css2?family=Gothic+A1:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+  :root {
+    --bg:#eef1f6; --surface:#ffffff; --surface-2:#f5f7fa;
+    --ink:#10131a; --ink-2:#545e6e; --ink-3:#8992a1;
+    --line:#e1e5ec; --line-strong:#c7ccd6;
+    --accent:#1a56e8; --accent-ink:#0e3bb0; --accent-sf:#ebf0fe;
+    --good:#14824b; --good-sf:#e4f4ea;
+    --warn:#a15b12; --warn-sf:#f7ecdc;
+    --crit:#b0272f; --crit-sf:#fbe9ea;
+    --mono: "JetBrains Mono", ui-monospace, Consolas, "D2Coding", monospace;
+    --shadow-sm: 0 1px 2px rgba(16,19,26,0.05);
+    --shadow-md: 0 8px 24px -12px rgba(16,19,26,0.16), 0 2px 6px rgba(16,19,26,0.05);
+  }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,"Malgun Gothic",sans-serif;
-    line-height:1.6; padding:32px 20px 80px; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Gothic A1","Pretendard",-apple-system,"Malgun Gothic",sans-serif;
+    line-height:1.6; padding:28px 20px 80px; }
   .wrap { max-width:760px; margin:0 auto; }
-  h1 { font-size:26px; margin:0 0 6px; }
-  .snapshot { font-size:13px; color:var(--ink-2); background:var(--surface); border:1px solid var(--line);
-    border-radius:8px; padding:8px 14px; display:inline-block; margin-bottom:24px; }
-  .card { background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:20px 22px; margin-bottom:18px; }
-  label { font-size:13px; font-weight:600; color:var(--ink-2); display:block; margin-bottom:6px; }
-  textarea, input, select { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:8px;
-    font-size:14px; font-family:inherit; margin-bottom:12px; }
-  button { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:10px 18px;
-    font-size:14px; font-weight:600; cursor:pointer; }
-  button.secondary { background:var(--surface); color:var(--ink); border:1px solid var(--line); }
-  .badge { display:inline-block; padding:5px 14px; border-radius:100px; font-weight:700; font-size:14px; }
-  .badge.PASS, .badge.SAFE { background:var(--good-sf); color:var(--accent); }
+
+  .appbar { display:flex; align-items:center; gap:10px; padding:2px 0 20px; }
+  .logo { width:30px; height:30px; border-radius:8px; background:var(--accent);
+    display:flex; align-items:center; justify-content:center; flex:none; }
+  .logo svg { width:16px; height:16px; }
+  .appname { font-size:16px; font-weight:800; letter-spacing:-0.01em; }
+  .appbar .spacer { flex:1; }
+
+  h1 { font-size:21px; font-weight:800; margin:0 0 4px; letter-spacing:-0.01em; text-wrap:balance; }
+  .lede { font-size:13px; color:var(--ink-3); margin:0 0 16px; }
+  .snapshot { font-size:11.5px; font-family:var(--mono); color:var(--ink-2); background:var(--surface);
+    border:1px solid var(--line); border-radius:999px; padding:6px 13px; display:inline-flex;
+    align-items:center; gap:6px; margin-bottom:22px; }
+  .snapshot::before { content:""; width:6px; height:6px; border-radius:50%; background:var(--good); flex:none; }
+
+  .card { background:var(--surface); border:1px solid var(--line); border-radius:16px;
+    box-shadow:var(--shadow-sm); padding:20px 22px 22px; margin-bottom:14px; }
+  label { font-size:12.5px; font-weight:600; color:var(--ink-2); display:block; margin-bottom:7px; }
+  textarea, input, select { width:100%; padding:10px 13px; border:1.5px solid var(--line-strong);
+    border-radius:10px; font-size:13.5px; font-family:inherit; color:var(--ink);
+    background:var(--surface-2); margin-bottom:13px; }
+  textarea:focus, input:focus, select:focus { outline:2px solid var(--accent); outline-offset:1px;
+    border-color:var(--accent); background:var(--surface); }
+  select, input:not([type=checkbox]) { background:var(--surface); }
+
+  button { background:var(--accent); color:#fff; border:none; border-radius:10px; padding:10px 18px;
+    font-size:13.5px; font-weight:700; font-family:inherit; cursor:pointer; }
+  button:hover { background:var(--accent-ink); }
+  button:focus-visible { outline:2px solid var(--accent-ink); outline-offset:2px; }
+  button.secondary { background:var(--surface); color:var(--ink); border:1.5px solid var(--line-strong); }
+
+  .badge { display:inline-block; padding:5px 14px; border-radius:100px; font-weight:700; font-size:13.5px;
+    font-family:var(--mono); }
+  .badge.PASS, .badge.SAFE { background:var(--good-sf); color:var(--good); }
   .badge.REVIEW, .badge.WARNING { background:var(--warn-sf); color:var(--warn); }
   .badge.HOLD, .badge.EXECUTION_BLOCKED, .badge.BREACH { background:var(--crit-sf); color:var(--crit); }
-  .badge.NOT_APPLICABLE { background:var(--bg); color:var(--ink-2); }
-  .subhead { font-size:12px; font-weight:700; color:var(--ink-2); text-transform:uppercase;
-    letter-spacing:.06em; margin:18px 0 8px; }
+  .badge.NOT_APPLICABLE { background:var(--surface-2); color:var(--ink-3); }
+
+  .subhead { font-size:11px; font-weight:700; color:var(--ink-3); text-transform:uppercase;
+    letter-spacing:.05em; margin:20px 0 9px; }
   .subhead:first-child { margin-top:0; }
-  .note { font-size:12px; color:var(--ink-2); margin-top:6px; }
-  .stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; margin-top:14px; }
-  .stat { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; }
-  .stat .l { font-size:11px; color:var(--ink-2); text-transform:uppercase; letter-spacing:.05em; }
-  .stat .v { font-family:var(--mono); font-size:16px; font-weight:700; margin-top:2px; }
-  .reason { margin-top:12px; font-size:14px; color:var(--ink-2); }
-  .evidence { margin-top:10px; font-size:12px; color:var(--ink-2); font-family:var(--mono); word-break:break-all; }
-  .interpret-box { font-size:13px; padding:10px 12px; border-radius:8px; margin-top:10px; }
-  .interpret-box.OK { background:var(--good-sf); }
-  .interpret-box.NEED_INFO, .interpret-box.UNSUPPORTED { background:var(--warn-sf); }
-  .interpret-box.ERROR { background:var(--crit-sf); }
+  .note { font-size:11.5px; color:var(--ink-3); margin-top:7px; line-height:1.55; }
+  .stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; margin-top:2px; }
+  .stat { background:var(--surface-2); border:1px solid var(--line); border-radius:10px; padding:11px 13px; }
+  .stat .l { font-size:10.5px; color:var(--ink-3); text-transform:uppercase; letter-spacing:.04em; }
+  .stat .v { font-family:var(--mono); font-size:15px; font-weight:700; margin-top:4px;
+    font-variant-numeric:tabular-nums; }
+  .reason { margin-top:12px; font-size:13.5px; color:var(--ink); line-height:1.6; }
+  .evidence { margin-top:10px; font-size:11.5px; color:var(--ink-2); font-family:var(--mono);
+    word-break:break-all; line-height:1.7; }
+  .evidence a { color:var(--accent-ink); }
+  .interpret-box { font-size:12.5px; padding:11px 13px; border-radius:10px; margin-top:11px; line-height:1.6; }
+  .interpret-box.OK { background:var(--good-sf); color:var(--ink); }
+  .interpret-box.NEED_INFO, .interpret-box.UNSUPPORTED { background:var(--warn-sf); color:var(--ink); }
+  .interpret-box.ERROR { background:var(--crit-sf); color:var(--ink); }
+
+  #resultCard { box-shadow:var(--shadow-md); }
+  #resultCard #decisionBadge { margin-bottom:2px; }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:#0b0d12; --surface:#15181f; --surface-2:#1b1f27;
+      --ink:#e9ebf0; --ink-2:#a4abb8; --ink-3:#6c7684;
+      --line:#262b35; --line-strong:#343b47;
+      --accent:#6d93ff; --accent-ink:#9db4ff; --accent-sf:#16213f;
+      --good:#4bc490; --good-sf:#122a20;
+      --warn:#dba05a; --warn-sf:#2b2113;
+      --crit:#e8747a; --crit-sf:#2e1517;
+    }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>금융행동 사전검증 — Action Reversal</h1>
+  <div class="appbar">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 3L4 8V16L12 21L20 16V8L12 3Z" stroke="white" stroke-width="1.6" stroke-linejoin="round"/>
+        <path d="M12 3V21M4 8L12 12L20 8" stroke="white" stroke-width="1.6" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <span class="appname">Butterfin</span>
+    <span class="spacer"></span>
+  </div>
+
+  <h1>금융행동 사전검증</h1>
+  <p class="lede">계획 중인 행동이 지금 받고 있는 우대조건을 깨는지, 실행 전에 확인하세요.</p>
   <div class="snapshot" id="snapshot">검증 스냅샷 기준일 확인 중…</div>
 
   <div class="card">
     <label>1. 하려는 행동을 문장으로 입력하세요</label>
-    <textarea id="actionText" rows="2" placeholder="예: 다음 달부터 카드사용 5만원을 다른 카드로 옮길 거야">다음 달부터 카드사용 5만원을 다른 카드로 옮길 거야</textarea>
+    <textarea id="actionText" rows="2" placeholder="예: 다음 달부터 카드사용 5만원을 다른 카드로 옮길 거야"></textarea>
     <button id="interpretBtn">해석하기</button>
     <div id="interpretResult"></div>
   </div>
