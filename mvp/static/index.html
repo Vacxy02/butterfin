@@ -8,6 +8,7 @@
   @import url('https://fonts.googleapis.com/css2?family=Gothic+A1:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
 
   :root {
+    color-scheme: light;
     --bg:#eef1f6; --surface:#ffffff; --surface-2:#f5f7fa;
     --ink:#10131a; --ink-2:#545e6e; --ink-3:#8992a1;
     --line:#e1e5ec; --line-strong:#c7ccd6;
@@ -83,17 +84,8 @@
   #resultCard { box-shadow:var(--shadow-md); }
   #resultCard #decisionBadge { margin-bottom:2px; }
 
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg:#0b0d12; --surface:#15181f; --surface-2:#1b1f27;
-      --ink:#e9ebf0; --ink-2:#a4abb8; --ink-3:#6c7684;
-      --line:#262b35; --line-strong:#343b47;
-      --accent:#6d93ff; --accent-ink:#9db4ff; --accent-sf:#16213f;
-      --good:#4bc490; --good-sf:#122a20;
-      --warn:#dba05a; --warn-sf:#2b2113;
-      --crit:#e8747a; --crit-sf:#2e1517;
-    }
-  }
+  /* 2026-09-04: 다크모드 자동 전환을 껐다 — 시스템 설정과 무관하게 항상 흰 배경으로
+     고정한다(요청: "다시 흰배경으로 바꾸자"). 위 :root 라이트 팔레트가 유일한 팔레트다. */
 </style>
 </head>
 <body>
@@ -115,8 +107,12 @@
 
   <div class="card">
     <label>1. 하려는 행동을 문장으로 입력하세요</label>
-    <textarea id="actionText" rows="2" placeholder="예: KB국민은행 일반 신용대출을 보유하고 있는데 카드 이용실적에 따른 금리감면 조건을 적용받고 있어, 앞으로 발생할 월 5만원의 카드 결제를 해당 우대조건에 반영되는 카드에서 다른 카드로 옮기려해 이행동으로 얻는 직접이득은 월 1000원이야"></textarea>
-    <button id="interpretBtn">해석하기</button>
+    <textarea id="actionText" rows="2" placeholder="예: 다음 달부터 카드사용 5만원을 다른 카드로 옮길 거야"></textarea>
+    <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+      <button id="interpretBtn">해석하기</button>
+      <button id="exampleBtn" type="button" class="secondary">예시 시나리오 실행</button>
+      <span class="note" id="exampleCounter" style="margin:0;"></span>
+    </div>
     <div id="interpretResult"></div>
   </div>
 
@@ -181,6 +177,36 @@ async function loadSnapshot() {
 }
 loadSnapshot();
 
+// 미리 만들어둔 데모 시나리오 4개 — demo_rules.json에 실제로 등록된 기관/상품·행동
+// 유형별로 하나씩 골랐다(카드실적 이동/상품 해지/결제계좌 변경/급여계좌 변경).
+// "예시 시나리오 실행" 버튼을 누를 때마다 순서대로 다음 시나리오로 바뀐다 — 매번
+// 같은 문장만 나오지 않게 한다. 실제 값을 지어내지 않고 항상 이 4개 중 하나로 고정.
+const EXAMPLE_SCENARIOS = [
+  'KB국민은행 일반 신용대출을 보유하고 있는데 카드 이용실적에 따른 금리감면 조건을 적용받고 있어, 앞으로 발생할 월 5만원의 카드 결제를 해당 우대조건에 반영되는 카드에서 다른 카드로 옮기려해 이행동으로 얻는 직접이득은 월 1000원이야',
+  '주택금융공사 디딤돌대출을 받고 있는데 우대금리 조건으로 유지하던 청약종합저축을 해지하려고 해',
+  '케이뱅크 자유적금 우대금리 때문에 케이뱅크 계좌로 자동이체하던 통신비 결제계좌를 다른 은행 계좌로 변경하려고 해',
+  '신협 적금 우대금리 조건 때문에 신협으로 급여이체하던 계좌를 다른 은행으로 바꾸려고 해',
+];
+let exampleIdx = 0;
+
+function updateExampleCounter() {
+  document.getElementById('exampleCounter').textContent =
+    `예시 ${exampleIdx + 1}/${EXAMPLE_SCENARIOS.length} — 다시 누르면 다음 예시`;
+}
+updateExampleCounter();
+
+document.getElementById('exampleBtn').onclick = () => {
+  const el = document.getElementById('actionText');
+  // 일반 .value 대입은 일부 브라우저/자동화 환경에서 input 이벤트를 놓칠 수 있어,
+  // 네이티브 setter를 직접 호출하고 input 이벤트를 수동으로 발생시킨다.
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+  setter.call(el, EXAMPLE_SCENARIOS[exampleIdx]);
+  el.dispatchEvent(new Event('input', {bubbles:true}));
+  el.focus();
+  exampleIdx = (exampleIdx + 1) % EXAMPLE_SCENARIOS.length;
+  updateExampleCounter();
+};
+
 document.getElementById('interpretBtn').onclick = async () => {
   const text = document.getElementById('actionText').value;
   const box = document.getElementById('interpretResult');
@@ -195,13 +221,18 @@ document.getElementById('interpretBtn').onclick = async () => {
     const foundBits = [d.institution, d.product].filter(Boolean).join(' · ');
     const dbBit = d.direct_benefit_monthly ? ' · 직접이득 ' + d.direct_benefit_monthly.toLocaleString() + '원 인식됨' : '';
     box.innerHTML = `<div class="interpret-box ${d.status}"><b>${d.status}</b> — ${shown}${d.amount_monthly ? ' · ' + d.amount_monthly.toLocaleString() + '원' : ''}${foundBits ? ' · [' + foundBits + '] 인식됨' : ''}${dbBit}</div>`;
-    if (d.status === 'OK' || d.status === 'NEED_INFO') {
+    // 2026-09-04: 전체 status가 NEED_INFO(심지어 UNSUPPORTED)여도, 그 문장에서 개별
+    // 필드 단위로 이미 확실하게 뽑힌 값이 있으면(예: 금액은 있는데 행동 유형만 모호한
+    // 경우) 2번 항목에 그 값들은 채워준다 — 전체 status와 필드별 채움은 서로 다른
+    // 질문이다. status 자체의 의미(불렀는지/막혔는지)는 위 배지에서 그대로 보여주고,
+    // 여기서는 "채울 수 있는 건 채운다"는 원칙만 적용한다. status가 ERROR일 때만
+    // (해석 요청 자체가 실패한 경우) 아무 것도 건드리지 않는다.
+    if (d.status !== 'ERROR') {
       if (d.action_type) document.getElementById('actionType').value = d.action_type;
       if (d.amount_monthly) document.getElementById('amount').value = d.amount_monthly;
-      // 2026-09-04 추가: 문장에 "직접효과/즉시 이득"이 금액과 함께 명시돼 있으면 그
-      // 값으로 카드 2의 직접 이득 입력창을 채운다. 문장에 없으면(null) 손대지 않는다 —
-      // 기존 값(기본 0 또는 사용자가 이미 입력해둔 값)을 그대로 둔다. amount_monthly와
-      // 마찬가지로 사용자가 카드 2에서 그대로 확인·수정할 수 있다.
+      // 문장에 "직접효과/즉시 이득"이 금액과 함께 명시돼 있으면 그 값으로 카드 2의
+      // 직접 이득 입력창을 채운다. 문장에 없으면(null) 손대지 않는다 — 기존 값(기본
+      // 0 또는 사용자가 이미 입력해둔 값)을 그대로 둔다.
       if (d.direct_benefit_monthly !== null && d.direct_benefit_monthly !== undefined) {
         document.getElementById('directBenefit').value = d.direct_benefit_monthly;
       }
