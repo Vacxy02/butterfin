@@ -442,9 +442,22 @@ document.getElementById('evaluateBtn').onclick = async () => {
     html += `</div>`;
   }
 
-  // 6. 현재 행동 위치
+  // 6. 현재 행동 위치 — 2026-09-05: 이산 판정 3유형은 safety.current_zone이 app.py에서
+  // 항상 문자열 "NOT_APPLICABLE"로 고정돼 있어서(연속 금액 모델의 SAFE/WARNING/BREACH
+  // 개념 자체가 없으므로), 조건을 위반했든 예외로 유지됐든 이 배지가 항상 똑같이
+  // "NOT_APPLICABLE"로만 보였다 — 정보가 없는 게 아니라 이미 3번 섹션에서 계산해둔
+  // condition(violation/exception_applied)을 여기 배지에도 반영하지 않았을 뿐이다.
+  // 그래서 이산 판정일 때는 이 값으로 실제 상태를 보여준다(연속형은 기존 그대로).
   html += `<div class="subhead">6. 현재 행동 위치</div><div class="stat-grid">`;
-  html += statCard('구간', `<span class="badge ${safety.current_zone}">${safety.current_zone || '확인 필요'}</span>`);
+  if (isDiscreteType) {
+    let zoneBadge, zoneLabel;
+    if (condition.exception_applied) { zoneBadge = 'SAFE'; zoneLabel = '유지됨 (예외 적용)'; }
+    else if (condition.lost_pct_p !== null && condition.lost_pct_p !== undefined) { zoneBadge = 'BREACH'; zoneLabel = '조건 미충족 (우대 상실)'; }
+    else { zoneBadge = 'NOT_APPLICABLE'; zoneLabel = '확인 필요'; }
+    html += statCard('구간', `<span class="badge ${zoneBadge}">${zoneLabel}</span>`);
+  } else {
+    html += statCard('구간', `<span class="badge ${safety.current_zone}">${safety.current_zone || '확인 필요'}</span>`);
+  }
   html += `</div>`;
 
   // 7. Binding Constraint
