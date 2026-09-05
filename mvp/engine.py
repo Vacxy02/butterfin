@@ -155,8 +155,13 @@ def evaluate_discrete_rule(*, rule_effect_pct_p: Optional[float], action_removes
     if not action_removes_condition:
         return DiscreteEffect(violation=False, reason="이 행동은 해당 조건을 건드리지 않습니다.")
     if exception_condition_met:
+        # 2026-09-04 수정: 매칭된 규칙에 exception 원문이 등록돼 있지 않으면(예: SHINHYUP_SALARY는
+        # demo_rules.json에 "exception" 필드가 없음) exception_text가 None으로 들어와 화면에
+        # "예외 조항이 적용됩니다: None"이라는 빈 값 노출 문구가 그대로 나가던 결함을 고친다 —
+        # None일 때는 일반화된 문구로 대체한다.
+        text = exception_text or "사용자가 체크한 예외 조건"
         return DiscreteEffect(violation=False, exception_applied=True,
-                               reason=f"예외 조항이 적용됩니다: {exception_text}")
+                               reason=f"예외 조항이 적용됩니다: {text}")
     return DiscreteEffect(violation=True, effect_lost_pct_p=rule_effect_pct_p,
                            reason=f"조건을 더 이상 충족하지 않아 우대(%.2f%%p 상당)가 사라집니다." % (rule_effect_pct_p or 0))
 

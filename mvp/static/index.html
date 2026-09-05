@@ -204,6 +204,21 @@ function updateExampleCounter() {
 updateExampleCounter();
 
 document.getElementById('exampleBtn').onclick = () => {
+  // 2026-09-05 (FINAL_HARDENING P0-2): 예시를 바꿔 누를 때 이전 예시에서 채워진
+  // 값(기관/상품/금액/직접이득/예외체크/이전 판정결과)이 화면에 그대로 남아 있으면,
+  // 이번 문장이 그 값을 새로 채우지 못하는 필드는 "이전 예시의 값"이 그대로 evaluate
+  // 요청에 실려 나갈 위험이 있다 — 지금의 5개 시나리오는 매번 정상 인식되는 것을
+  // 실측으로 확인했지만, 문장 인식이 흔들리는 경우를 대비해 예시를 새로 불러올
+  // 때마다 카드 2 입력값과 이전 결과 카드를 항상 먼저 비운다(fail-closed).
+  document.getElementById('actionType').selectedIndex = 0;
+  document.getElementById('institution').value = '';
+  document.getElementById('product').value = '';
+  document.getElementById('amount').value = '';
+  document.getElementById('directBenefit').value = 0;
+  document.getElementById('exceptionMet').checked = false;
+  document.getElementById('interpretResult').innerHTML = '';
+  document.getElementById('resultCard').style.display = 'none';
+
   const el = document.getElementById('actionText');
   // 일반 .value 대입은 일부 브라우저/자동화 환경에서 input 이벤트를 놓칠 수 있어,
   // 네이티브 setter를 직접 호출하고 input 이벤트를 수동으로 발생시킨다.
