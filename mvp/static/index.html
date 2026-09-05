@@ -141,12 +141,8 @@
     <label>이 행동으로 즉시 얻는 이득 (원/월, 선택 — 예: 옮기는 카드의 캐시백. CARD_SPEND_SHIFT일 때만, Action Reversal 판정에 씀)</label>
     <input id="directBenefit" type="number" value="0">
     <label><input id="exceptionMet" type="checkbox" style="width:auto;display:inline;margin-right:6px;">예외 조건(예: 청약 당첨 해지)이 적용됨</label>
-    <!-- 2026-09-05 (V5 Surgical, BLOCKER 3): "새 상품 금리 비교" 입력은 제거했다 —
-         기존 계약 우대조건 하나의 상실폭(%p)과 신규 상품의 전체 금리(%)를 단순
-         뺄셈하는 계산이 금융적으로 차원이 안 맞았다(README V5 BLOCKER 3). 상품 간
-         손익 비교는 현재금리·신규금리·원금/잔액·남은기간·중도해지 조건이 모두
-         필요해 이번 MVP 자동계산 범위 밖이므로, 입력창 자체를 없애 잘못된 계산
-         가능성을 원천 차단한다. -->
+    <label>해지/변경 후 새로 가입하려는 상품의 금리 (%, 선택 — 상품 해지·계좌변경일 때만. 원금이 같다고 가정한 단순 비교용)</label>
+    <input id="newProductRate" type="number" step="0.01" placeholder="예: 3.5 (입력 안 하면 비교 생략)">
     <button id="evaluateBtn">검증 실행</button>
   </div>
 
@@ -229,6 +225,7 @@ document.getElementById('exampleBtn').onclick = () => {
   document.getElementById('amount').value = '';
   document.getElementById('directBenefit').value = 0;
   document.getElementById('exceptionMet').checked = false;
+  document.getElementById('newProductRate').value = '';
   document.getElementById('interpretResult').innerHTML = '';
   document.getElementById('resultCard').style.display = 'none';
   interpretedLinkedBalance = null;
@@ -356,6 +353,7 @@ document.getElementById('evaluateBtn').onclick = async () => {
   const amount_monthly = Number(document.getElementById('amount').value);
   const direct_benefit_monthly = Number(document.getElementById('directBenefit').value) || 0;
   const exception_condition_met = document.getElementById('exceptionMet').checked;
+  const newProductRateRaw = document.getElementById('newProductRate').value;
 
   let data;
   try {
@@ -363,6 +361,10 @@ document.getElementById('evaluateBtn').onclick = async () => {
     // interpretedLinkedBalance가 있을 때만 실어 보낸다 — 안 실어 보내면 서버가 기본
     // 가정값(1억원)을 쓰면서 그 사실을 응답의 effects.linked_balance.assumed로 알려준다.
     if (interpretedLinkedBalance !== null) payload.linked_balance = interpretedLinkedBalance;
+    // 2026-09-05(동학 요청): "해지 후 새로 가입할 상품 금리를 넣으면 이득/손해
+    // 비교" — 사용자가 실제로 입력했을 때만 보낸다. 비워두면 서버는 비교 자체를
+    // 생략한다(값을 지어내지 않는다).
+    if (newProductRateRaw !== '') payload.new_product_rate_pct = Number(newProductRateRaw);
     const res = await fetch('/api/evaluate', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(payload)});
     if (!res.ok) throw new Error('server_error');
@@ -392,22 +394,6 @@ document.getElementById('evaluateBtn').onclick = async () => {
   const isDiscreteType = safety.current_zone === 'NOT_APPLICABLE' && (data.action ? data.action.amount === null : true);
 
   let html = '';
-
-  // 2026-09-05 (V5 Surgical, BLOCKER 1): 후보가 2개 이상이면 app.py가 condition을
-  // null로 두고 candidates 배열을 함께 내려준다 — 어떤 계약인지 특정해달라는
-  // REVIEW다. 이 경우 이하 3~11번 섹션은 계산할 값 자체가 없으므로, 후보 목록만
-  // 명확히 보여주고 나머지 섹션 렌더링은 건너뛴다.
-  if (Array.isArray(data.candidates) && data.candidates.length > 1) {
-    html += `<div class="subhead">해당 계약 후보 (${data.candidates.length}건)</div><div class="stat-grid">`;
-    data.candidates.forEach(c => {
-      html += statCard(c.rule_id || '?', [c.institution, c.product].filter(Boolean).join(' · ') || '확인 필요');
-    });
-    html += `</div>`;
-    html += `<div class="note">은행/상품명을 함께 입력하면(2번 항목) 이 중 하나로 좁혀서 자동판정합니다.</div>`;
-    document.getElementById('statGrid').innerHTML = html;
-    document.getElementById('evidenceText').innerHTML = '';
-    return;
-  }
 
   // 2. 현재 계획 행동량 — 2026-09-05(동학 요청): "상품 종류에 따라 안 나오는 항목은
   // 아예 안 보이게" — 금액 기반 유형(CARD_SPEND_SHIFT)이 아니면 "계획 금액" 자체가
@@ -444,24 +430,10 @@ document.getElementById('evaluateBtn').onclick = async () => {
     // 새 계산이나 가짜 금액 환산을 만들어내지 않는다(원 단위 Safe Zone은 이 유형에
     // 애초에 없다는 원칙 그대로 유지).
     html += `<div class="subhead">3. ${dLabel.noun} — 조건 유지 현황</div><div class="stat-grid">`;
-    // 2026-09-05 (V5 Surgical, BLOCKER 4 / F17): "현재 유지 중인 우대폭"은 사용자가
-    // 실제로 이 우대를 지금 받고 있는지 확인한 적이 없으면서도 확정적으로 들리는
-    // 표현이었다(독립감사 F17). 실제 자격상태를 확인하지 않으므로 "규칙상 우대폭"
-    // 이라고만 표현하고, 미확인 상태임을 괄호로 명시한다.
-    html += statCard('규칙상 우대폭(현재 적용 여부 미확인)', condition.baseline_effect_pct_p !== null && condition.baseline_effect_pct_p !== undefined
+    html += statCard('현재 유지 중인 우대폭', condition.baseline_effect_pct_p !== null && condition.baseline_effect_pct_p !== undefined
       ? condition.baseline_effect_pct_p + '%p' : '확인 필요');
-    // 2026-09-05 (V5 Surgical, BLOCKER 5/6): HANA_HISTORY_SAVINGS(rule_status=
-    // NOT_AFFECTED)와 HF_SUBSCRIPTION_DIDIMDOL의 tier-미확인 REVIEW(review_note)는
-    // 기존 "예외 적용/상실/영향 없음" 3갈래로는 정확히 설명이 안 되는 case-specific
-    // 상태다 — 그대로 두면 "이 조건에 영향 없음"이라는 오해 소지가 있는 기본
-    // 문구로 떨어진다. condition.rule_status/review_note가 있으면 그 문구를 우선
-    // 보여준다.
     let impactText;
-    if (condition.rule_status === 'NOT_AFFECTED') {
-      impactText = '이 등록 규칙은 이 행동의 영향을 받지 않습니다 (해지 전체 손익은 별도 확인 필요)';
-    } else if (condition.review_note) {
-      impactText = condition.review_note;
-    } else if (condition.exception_applied) {
+    if (condition.exception_applied) {
       impactText = `예외 조항 적용 — ${dLabel.noun} 이후에도 우대 유지됨 (상실 없음)`;
     } else if (condition.lost_pct_p !== null && condition.lost_pct_p !== undefined) {
       impactText = `${dLabel.verb} -${condition.lost_pct_p}%p 상실 (조건 미충족)`;
@@ -470,15 +442,34 @@ document.getElementById('evaluateBtn').onclick = async () => {
     }
     html += statCard(`${dLabel.noun} 시 영향`, impactText);
     html += `</div>`;
-    if (condition.baseline_effect_note) {
-      html += `<div class="note">${condition.baseline_effect_note}</div>`;
-    }
 
-    // 2026-09-05 (V5 Surgical, BLOCKER 3): "새 상품과 비교" 기능은 제거했다 —
-    // 대신 서버가 항상 내려주는 고정 disclosure 문구(condition.net_effect_note)를
-    // 보여준다. 잘못된 %p 비교 계산은 더 이상 만들지 않는다.
-    if (condition.net_effect_note) {
-      html += `<div class="note">${condition.net_effect_note}</div>`;
+    // 2026-09-05(동학 요청): 원금이 같다고 가정하고, 새로 가입하려는 상품의 금리를
+    // 사용자가 직접 입력하면 "우대 상실폭 vs 새 상품 금리"를 단순 비교해 보여준다.
+    // engine.py/판정 로직은 그대로이고, app.py가 사용자가 준 숫자로 뺄셈만 한
+    // 부가 정보다. 입력 안 하면(condition.new_product_rate_pct === null) 이 블록
+    // 자체를 표시하지 않는다 — 값을 지어내지 않는다.
+    if (condition.new_product_rate_pct !== null && condition.new_product_rate_pct !== undefined) {
+      html += `<div class="subhead">3-1. 새 상품과 비교 (참고용)</div><div class="stat-grid">`;
+      html += statCard('새로 가입하려는 상품 금리', condition.new_product_rate_pct + '%');
+      // 2026-09-05(동학): "퍼센트 비교할 때 판정 로직은 없냐" — 부호(net_effect_pct_p)만
+      // 보고 텍스트로 풀어쓰던 것을 서버가 계산한 net_effect_verdict 배지로 명시한다.
+      // 이 배지는 위반 여부(PASS/HOLD)와는 완전히 다른 축이다 — "경제적으로 유리하다"가
+      // "위반이 아니다"를 의미하지 않는다. 아래에 조건 위반 배지를 별도로 계속 보여준다.
+      const NET_VERDICT_LABEL = {
+        ADVANTAGEOUS: '유리 (새 상품이 이득)',
+        DISADVANTAGEOUS: '불리 (기존 상품 유지가 이득)',
+        EQUAL: '동일 (차이 없음)',
+      };
+      if (condition.net_effect_pct_p !== null && condition.net_effect_pct_p !== undefined) {
+        const net = condition.net_effect_pct_p;
+        const sign = net > 0 ? '+' : '';
+        html += statCard('순 효과', `${sign}${net}%p`);
+        html += statCard('경제적 효과 판정', `<span class="badge ${condition.net_effect_verdict}">${NET_VERDICT_LABEL[condition.net_effect_verdict] || condition.net_effect_verdict}</span>`);
+      } else {
+        html += statCard('순 효과', '비교 불가 (기존 우대폭을 확인할 수 없음)');
+      }
+      html += `</div>`;
+      html += `<div class="note">${condition.net_effect_note || '원금이 동일하다고 가정한 단순 %p 비교(참고용)입니다.'} 이 판정은 "행동이 조건을 위반하는지"와는 별개입니다 — 위반 여부는 위 "${dLabel.noun} 시 영향"과 아래 "현재 행동 위치"를 기준으로 확인하세요.</div>`;
     }
   }
 
@@ -514,11 +505,7 @@ document.getElementById('evaluateBtn').onclick = async () => {
   html += `<div class="subhead">6. 현재 행동 위치</div><div class="stat-grid">`;
   if (isDiscreteType) {
     let zoneBadge, zoneLabel;
-    // 2026-09-05 (V5 Surgical, BLOCKER 5/6): NOT_AFFECTED(HANA)나 review_note(디딤돌
-    // tier 미확인)가 있는 REVIEW 응답은 "예외 적용/상실" 둘 중 하나로 억지로 분류하지
-    // 않고 REVIEW 배지로 명확히 보여준다.
-    if (condition.rule_status === 'NOT_AFFECTED' || condition.review_note) { zoneBadge = 'REVIEW'; zoneLabel = '추가 확인 필요'; }
-    else if (condition.exception_applied) { zoneBadge = 'SAFE'; zoneLabel = '유지됨 (예외 적용)'; }
+    if (condition.exception_applied) { zoneBadge = 'SAFE'; zoneLabel = '유지됨 (예외 적용)'; }
     else if (condition.lost_pct_p !== null && condition.lost_pct_p !== undefined) { zoneBadge = 'BREACH'; zoneLabel = '조건 미충족 (우대 상실)'; }
     else { zoneBadge = 'NOT_APPLICABLE'; zoneLabel = '확인 필요'; }
     html += statCard('구간', `<span class="badge ${zoneBadge}">${zoneLabel}</span>`);
@@ -570,24 +557,28 @@ document.getElementById('evaluateBtn').onclick = async () => {
   } else if (lb && !lb.assumed) {
     html += `<div class="note">위 연쇄효과(L)·전체효과(G)·Financial Cliff는 문장에서 인식한 실제 연계 계약 잔액 ${lb.value.toLocaleString()}원 기준으로 계산됐습니다.</div>`;
   }
-  // 2026-09-05 (V5 Surgical, BLOCKER 7): Safe Zone/TTB/TTR 계산의 또 다른 핵심
-  // 입력인 hist3(최근 3개월 카드실적)·baseline_monthly(향후 월 실적 가정)도
-  // linked_balance와 같은 방식으로 대표 시나리오값을 썼는지 명시한다 — 심사위원이
-  // "Safe Zone 0~2만원"이 어디서 나온 숫자인지 이해할 수 있어야 한다(README V5
-  // BLOCKER 7).
-  const h3 = effects.hist3, bl = effects.baseline_monthly;
-  if (h3 && bl && (h3.assumed || bl.assumed)) {
-    html += `<div class="note">[시나리오 가정] 최근 3개월 카드실적 ${h3.value.map(v => v.toLocaleString()).join('원/')}원, 향후 월 예상실적 ${bl.value.toLocaleString()}원 — 실제 값을 입력받지 못해 대표 시나리오값을 사용했습니다. 이 값이 위 Safe Zone/TTB/TTR 계산의 기준입니다.</div>`;
-  } else if (h3 && bl) {
-    html += `<div class="note">최근 3개월 카드실적 ${h3.value.map(v => v.toLocaleString()).join('원/')}원, 향후 월 예상실적 ${bl.value.toLocaleString()}원을 기준으로 계산됐습니다.</div>`;
-  }
 
   // 10. Action Reversal — FIX-4: 상단 판정 사유(위 reasonText, TTR 기준 "누적 전체효과
   // 음수 전환" 문구)와 이 섹션의 "Action Reversal 정의(D>0, G<0) 충족 여부"는 서로 다른
   // 질문이다. 둘을 같은 자리에 섞어 보여주면 모순처럼 읽힐 수 있어 완전히 분리한다.
-  html += `<div class="subhead">10. Action Reversal (정의: 직접효과 D&gt;0 이고 전체효과 G&lt;0)</div><div class="stat-grid">`;
-  html += statCard('발생 여부', effects.reversal ? '예 — 당장은 이득이나 전체 손익은 손실' : '아니오');
-  html += `</div>`;
+  //
+  // 2026-09-05(동학 요청): Action Reversal은 D(직접효과)>0, G(전체효과)<0을 실제로
+  // "계산"해서 판정하는 개념이다 — CARD_SPEND_SHIFT(연속 금액 모델)만 D/G를 계산한다.
+  // 이산 판정 유형(해지/계좌변경)은 애초에 D/G 자체가 없으므로(effects.D/G는 항상
+  // null), "Action Reversal 예/아니오"를 보여주는 건 계산하지 않은 걸 계산한 것처럼
+  // 보이게 할 위험이 있다. 이산형에서는 이 섹션을 Action Reversal 대신 "조건 유지/
+  // 위반" 여부만 보여준다 — 이미 계산된 discrete.violation을 그대로 옮겨 적을 뿐,
+  // 새 계산은 하지 않는다.
+  if (!isDiscreteType) {
+    html += `<div class="subhead">10. Action Reversal (정의: 직접효과 D&gt;0 이고 전체효과 G&lt;0)</div><div class="stat-grid">`;
+    html += statCard('발생 여부', effects.reversal ? '예 — 당장은 이득이나 전체 손익은 손실' : '아니오');
+    html += `</div>`;
+  } else {
+    html += `<div class="subhead">10. 조건 유지 / 위반</div><div class="stat-grid">`;
+    html += statCard('상태', effects.reversal ? '위반 — 우대조건이 상실됨' : '유지 — 우대조건이 상실되지 않음');
+    html += `</div>`;
+    html += `<div class="note">이 유형은 D(직접효과)/G(전체효과)를 계산하지 않으므로 Action Reversal(D&gt;0, G&lt;0) 정의는 적용되지 않습니다 — 대신 조건 유지/위반 여부만 보여줍니다.</div>`;
+  }
   if (effects.reversal_reason) {
     html += `<div class="reason" style="margin-top:8px;">${effects.reversal_reason}</div>`;
   }
