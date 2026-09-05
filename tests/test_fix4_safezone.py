@@ -204,6 +204,30 @@ check("경제적 효과 판정: 새 상품 금리가 상실폭과 정확히 같�
 check("경제적 효과 판정: 비교 입력이 없으면 net_effect_verdict도 null(값 지어내지 않음)",
       r_no_compare["condition"]["net_effect_verdict"] is None)
 
+# ---------------------------------------------------------------------------
+# 2026-09-05 (동학 요청 3차): "상품 종류에 따라 안 나오는 항목은 아예 안 보이게" —
+# 이산 판정 유형(해지/계좌변경)에서 항상 None/미지원이던 "계획 금액"·"9. D/L/G"·
+# "11. TTB/TTR" 세 항목이 빈 placeholder 문구로 자리를 차지하는 대신 섹션 자체가
+# 렌더링되지 않는지 정적으로 확인한다(index.html은 여기서 실행하지 않고 소스만
+# 확인 — JS 실행 테스트는 없는 codebase 관례를 그대로 따름).
+# ---------------------------------------------------------------------------
+check("UI 항목 숨김: '계획 금액'을 보여주던 옛 placeholder 문구('해당 없음 (금액 기반 유형이 아님)')가 코드에서 사라짐",
+      "해당 없음 (금액 기반 유형이 아님)" not in _index_html)
+check("UI 항목 숨김: '9. 경제적 효과 (D / L / G)'를 보여주던 옛 placeholder 문구('이 유형은 금액 모델 미지원')가 실제 표시 코드(주석 제외)에서 사라짐",
+      not any("이 유형은 금액 모델 미지원" in ln for ln in _code_lines))
+_idx_plan_amount = _index_html.find("statCard('계획 금액'")
+check("UI 항목 숨김: '계획 금액' 카드가 isDiscreteType이 아닐 때만(!isDiscreteType) 렌더링되도록 감싸짐",
+      _idx_plan_amount != -1
+      and "if (!isDiscreteType)" in _index_html[max(0, _idx_plan_amount - 200):_idx_plan_amount])
+_idx_dlg = _index_html.find('subhead">9. 경제적 효과')
+check("UI 항목 숨김: '9. 경제적 효과 (D/L/G)' 섹션 전체가 !isDiscreteType으로 감싸짐",
+      _idx_dlg != -1
+      and "if (!isDiscreteType)" in _index_html[max(0, _idx_dlg - 200):_idx_dlg])
+_idx_ttbttr = _index_html.find('subhead">11. Time-to-Breach')
+check("UI 항목 숨김: '11. TTB/TTR' 섹션 전체가 !isDiscreteType으로 감싸짐",
+      _idx_ttbttr != -1
+      and "if (!isDiscreteType)" in _index_html[max(0, _idx_ttbttr - 200):_idx_ttbttr])
+
 print(f"\n{passed} passed, {failed} failed")
 if failed:
     raise SystemExit(1)
