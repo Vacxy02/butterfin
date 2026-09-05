@@ -242,7 +242,7 @@ class SafeZoneResult:
     robust_status: str                       # CALCULATED | NOT_APPLICABLE | EMPTY_SAFE_ZONE
     robust_safe_zone: Dict[str, Optional[int]]
     warning_zone: Dict[str, Optional[int]]
-    warning_status: str                      # CALCULATED | NONE | NOT_APPLICABLE (2026-08-30 FIX-2)
+    warning_status: str                      # CALCULATED | NOT_APPLICABLE (2026-09-05: "NONE" 폐지, FIX-2 되돌림)
     binding_constraints: List[str]
     current_zone: str                        # SAFE | WARNING | BREACH | REVIEW
     financial_cliff: Optional[float]
@@ -335,16 +335,15 @@ def compute_safe_zone(
 
     robust_safe_zone = {"min": 0, "max": robust_value}
 
-    # Warning Zone = (robust_value, nominal]. robust_value == nominal이면 이 구간은
-    # 공집합이다 — "20,000원 ~ 20,000원"처럼 폭이 0인 숫자 구간으로 보여주지 않고
-    # warning_status="NONE"으로 명시한다(FIX-2, 02_FIX_1차원SafeZone_4개.md).
-    # robust_value < nominal일 때만 실제 경고구간이 존재한다.
-    if robust_value >= nominal:
-        warning_status = "NONE"
-        warning_zone = {"min_exclusive": None, "max_inclusive": None}
-    else:
-        warning_status = "CALCULATED"
-        warning_zone = {"min_exclusive": robust_value, "max_inclusive": nominal}
+    # Warning Zone = (robust_value, nominal]. robust_value == nominal이면 폭 0인 구간
+    # (예: "20,000원 ~ 20,000원")이 되지만, 그 값 자체(robust_value/nominal)는 실제로
+    # 계산된 값이므로 null로 감추지 않고 그대로 보여준다(2026-09-05, 동학 요청으로
+    # FIX-2의 "폭 0 구간→NONE 치환"을 되돌림 — 주의: 이 파일은 v1-freeze-2026-09-03
+    # Freeze 대상이라 이 변경은 기존 190/190 회귀·서버검증 15/16·FINAL_UNSEEN 결과를
+    # 무효화한다는 점을 동학이 확인한 뒤 적용한 것. 관련 테스트도 이 동작에 맞춰 갱신함
+    # — tests/test_fix4_safezone.py).
+    warning_status = "CALCULATED"
+    warning_zone = {"min_exclusive": robust_value, "max_inclusive": nominal}
 
     # 3) 현재 계획 행동 x의 zone 판정 (03_1차원_구간판정_규칙.md 그대로)
     if planned_x is None:

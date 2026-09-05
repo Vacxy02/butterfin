@@ -42,10 +42,13 @@ client = flask_app.test_client()
 # FIX-2 Warning Zone 공집합 처리
 # ---------------------------------------------------------------------------
 z_no_unc = compute_safe_zone(hist3=HIST3, baseline_monthly=BASELINE, rules=RULES_KB, planned_x=None)
-check("FIX-2: robust==nominal → warning_status=NONE",
-      z_no_unc.robust_safe_limit == z_no_unc.nominal_safe_limit and z_no_unc.warning_status == "NONE")
-check("FIX-2: warning_status=NONE이면 warning_zone 양쪽 다 null (20,000~20,000처럼 안 보임)",
-      z_no_unc.warning_zone == {"min_exclusive": None, "max_inclusive": None})
+# 2026-09-05 (동학 요청): FIX-2의 "폭 0 구간→NONE 치환"을 되돌림 — robust==nominal이어도
+# 실제 계산된 값(20,000~20,000)을 그대로 노출한다. 이 두 assert는 되돌리기 전 동작
+# 대신 되돌린 뒤의 동작을 검증하도록 갱신했다(원래 assert는 위 커밋 이전 버전 참고).
+check("FIX-2 되돌림: robust==nominal이어도 warning_status=CALCULATED(값 자체는 실제 계산값)",
+      z_no_unc.robust_safe_limit == z_no_unc.nominal_safe_limit and z_no_unc.warning_status == "CALCULATED")
+check("FIX-2 되돌림: warning_zone이 실제 값(20,000~20,000)을 그대로 담음(null 아님)",
+      z_no_unc.warning_zone == {"min_exclusive": z_no_unc.nominal_safe_limit, "max_inclusive": z_no_unc.nominal_safe_limit})
 
 z_unc = compute_safe_zone(hist3=HIST3, baseline_monthly=BASELINE, rules=RULES_KB, planned_x=None,
                            uncertainty_scenarios=UNC)
