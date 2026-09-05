@@ -51,6 +51,14 @@ class TypedActionDelta:
     # 구분해서 뽑도록 지시한다. 문장에 없으면 None이며, 화면(카드 2)은 이 값이 None이면
     # 기존처럼 0을 기본값으로 두고 사용자가 직접 입력하게 한다(추측해서 채우지 않음).
     direct_benefit_monthly: Optional[float] = None
+    # 2026-09-05 추가: 연쇄효과(L) 계산은 "연계된 다른 계약(대출 등)의 잔액"이 반드시
+    # 있어야 하는데, 지금까지는 이 값을 사용자에게 물어본 적이 없어 app.py가 항상
+    # 고정값(1억원)을 가정해왔다 — 그 결과 실제 잔액과 무관하게 모든 시나리오의
+    # 연쇄효과가 같은 가정 위에서만 계산되는 구조적 문제가 있었다. 문장에 잔액이
+    # 명시돼 있으면(예: "대출잔액 3천만원이야") 그 값을 여기 담는다. 없으면 None —
+    # 추측해서 채우지 않는다(app.py가 None일 때만 기본 가정값을 쓰고, 그 사실을
+    # 화면에 "가정값"이라고 명시한다).
+    linked_balance_won: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

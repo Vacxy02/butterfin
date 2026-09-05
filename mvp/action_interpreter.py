@@ -168,7 +168,7 @@ SYSTEM_PROMPT = f"""너는 사용자의 한국어 문장을 아래 4가지 행�
 JSON만 출력한다: {{"status": "OK"|"NEED_INFO"|"UNSUPPORTED",
 "action_type": 유형 또는 null, "target_metric": 문자열 또는 null,
 "amount_monthly": 숫자 또는 null, "direct_benefit_monthly": 숫자 또는 null,
-"clarifying_question": 문자열 또는 null}}
+"linked_balance_won": 숫자 또는 null, "clarifying_question": 문자열 또는 null}}
 
 이 문장에는 서로 다른 두 종류의 금액이 나올 수 있다 — 절대 섞지 않는다.
 - amount_monthly: 오직 행동 그 자체의 월간 규모(예: 매달 다른 카드로 옮기는 카드 실적
@@ -183,6 +183,11 @@ JSON만 출력한다: {{"status": "OK"|"NEED_INFO"|"UNSUPPORTED",
   말고 status="NEED_INFO"로 하고 clarifying_question에 되물을 질문을 쓴다.
 예시: "다음 달부터 카드사용 5만원을 다른 카드로 옮길 거야. 이 행동으로 매달 3000원의
 캐시백 직접효과를 얻어." → amount_monthly=50000, direct_benefit_monthly=3000.
+
+- linked_balance_won: 이 행동과 연결된 다른 계약(대출·예금 등)의 현재 잔액/원금이
+  문장에 숫자로 명시돼 있으면 그 값을 담는다 — 예: "대출잔액 3천만원", "대출 잔액은
+  5천만원이야", "예금 잔액 2천만원". 문장에 이 잔액이 전혀 언급되지 않으면 반드시
+  null로 둔다 — 절대 추측하거나 평균치를 만들어내지 않는다.
 
 규칙:
 - 금액/유형이 불명확하면 status="NEED_INFO"로 하고 clarifying_question에 되물을 질문을 쓴다.
@@ -201,40 +206,58 @@ def _mock_direct_benefit(t: str) -> Optional[int]:
     return int(m.group(1).replace(",", "")) if m else None
 
 
+def _mock_linked_balance(t: str) -> Optional[int]:
+    """키워드(잔액/원금) 근처에 나오는 금액만 linked_balance_won으로 뽑는다 — "숫자+만원"
+    표기와 "숫자+원" 표기를 모두 지원한다. 못 찾으면 None(추측하지 않음, 1억원 같은
+    기본값을 여기서 만들어내지 않는다 — 그건 app.py가 명시적으로 표시하며 가정할 몫)."""
+    kw = r"(?:잔액|원금)"
+    m = re.search(kw + r"[^\d]{0,12}(\d[\d,]*)\s*만\s*원", t)
+    if m:
+        return int(m.group(1).replace(",", "")) * 10_000
+    m = re.search(kw + r"[^\d]{0,12}(\d[\d,]*)\s*원", t)
+    return int(m.group(1).replace(",", "")) if m else None
+
+
 def _mock_interpret(text: str) -> Dict[str, Any]:
     """키워드 기반 mock. 실제 Gemini 언어이해를 대표하지 않는다 — 파이프라인 검증용."""
     t = text or ""
     amount_m = re.search(r"(\d[\d,]*)\s*만\s*원", t)
     amount = int(amount_m.group(1).replace(",", "")) * 10_000 if amount_m else None
     db = _mock_direct_benefit(t)
+    lb = _mock_linked_balance(t)
 
     if "해지" in t and ("청약" in t or "적금" in t or "예금" in t):
-        return {"status": "OK", "action_type": "PRODUCT_TERMINATION",
+        result = {"status": "OK", "action_type": "PRODUCT_TERMINATION",
                 "target_metric": "product_hold_status", "amount_monthly": None,
                 "direct_benefit_monthly": db, "clarifying_question": None}
-    if ("카드" in t) and ("옮" in t or "이동" in t or "다른" in t):
+    elif ("카드" in t) and ("옮" in t or "이동" in t or "다른" in t):
         if amount is None:
-            return {"status": "NEED_INFO", "action_type": "CARD_SPEND_SHIFT",
+            result = {"status": "NEED_INFO", "action_type": "CARD_SPEND_SHIFT",
                      "target_metric": "rolling_3m_card_spend", "amount_monthly": None,
                      "direct_benefit_monthly": db,
                      "clarifying_question": "매달 얼마를 다른 카드로 옮기실 건가요?"}
-        return {"status": "OK", "action_type": "CARD_SPEND_SHIFT",
-                 "target_metric": "rolling_3m_card_spend", "amount_monthly": amount,
-                 "direct_benefit_monthly": db, "clarifying_question": None}
-    if "결제계좌" in t or ("계좌" in t and "변경" in t):
-        return {"status": "OK", "action_type": "PAYMENT_ACCOUNT_CHANGE",
+        else:
+            result = {"status": "OK", "action_type": "CARD_SPEND_SHIFT",
+                     "target_metric": "rolling_3m_card_spend", "amount_monthly": amount,
+                     "direct_benefit_monthly": db, "clarifying_question": None}
+    elif "결제계좌" in t or ("계좌" in t and "변경" in t):
+        result = {"status": "OK", "action_type": "PAYMENT_ACCOUNT_CHANGE",
                  "target_metric": "attribution_account", "amount_monthly": None,
                  "direct_benefit_monthly": db, "clarifying_question": None}
-    if "급여" in t and ("계좌" in t or "이체" in t):
-        return {"status": "OK", "action_type": "SALARY_ACCOUNT_CHANGE",
+    elif "급여" in t and ("계좌" in t or "이체" in t):
+        result = {"status": "OK", "action_type": "SALARY_ACCOUNT_CHANGE",
                  "target_metric": "salary_account", "amount_monthly": None,
                  "direct_benefit_monthly": db, "clarifying_question": None}
-    if not t.strip():
-        return {"status": "NEED_INFO", "action_type": None, "target_metric": None,
+    elif not t.strip():
+        result = {"status": "NEED_INFO", "action_type": None, "target_metric": None,
                  "amount_monthly": None, "direct_benefit_monthly": None,
                  "clarifying_question": "어떤 행동을 하려고 하시는지 알려주세요."}
-    return {"status": "UNSUPPORTED", "action_type": None, "target_metric": None,
+    else:
+        result = {"status": "UNSUPPORTED", "action_type": None, "target_metric": None,
              "amount_monthly": None, "direct_benefit_monthly": None, "clarifying_question": None}
+
+    result["linked_balance_won"] = lb
+    return result
 
 
 def _double_check(d: Dict[str, Any]) -> Dict[str, Any]:
@@ -266,7 +289,8 @@ def interpret(text: str, force_mock: bool = False) -> Tuple[TypedActionDelta, Di
                                   amount_monthly=raw.get("amount_monthly"), raw_text=text,
                                   clarifying_question=raw.get("clarifying_question"),
                                   institution=inst, product=prod,
-                                  direct_benefit_monthly=raw.get("direct_benefit_monthly"))
+                                  direct_benefit_monthly=raw.get("direct_benefit_monthly"),
+                                  linked_balance_won=raw.get("linked_balance_won"))
         return delta, {"model_name": f"mock-not-{AI_PROVIDER}", "prompt_version": PROMPT_VERSION}
 
     try:
@@ -289,6 +313,7 @@ def interpret(text: str, force_mock: bool = False) -> Tuple[TypedActionDelta, Di
                               amount_monthly=raw.get("amount_monthly"), raw_text=text,
                               clarifying_question=raw.get("clarifying_question"),
                               institution=inst, product=prod,
-                              direct_benefit_monthly=raw.get("direct_benefit_monthly"))
+                              direct_benefit_monthly=raw.get("direct_benefit_monthly"),
+                              linked_balance_won=raw.get("linked_balance_won"))
     return delta, {"model_name": result["model"], "prompt_version": PROMPT_VERSION,
                     "latency_ms": result["latency_ms"]}

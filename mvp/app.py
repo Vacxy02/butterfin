@@ -129,7 +129,17 @@ def api_evaluate():
 
         hist3 = body.get("hist3") or DEFAULT_HIST3
         baseline = body.get("baseline_monthly") or DEFAULT_BASELINE
-        linked_balance = body.get("linked_balance", 100_000_000)
+        # 2026-09-05: linked_balance(연계 계약 잔액)는 지금까지 화면이 아예 보내주는
+        # 값이 없어서 매번 아래 기본값(1억원)을 무조건 썼다 — 그 결과 연쇄효과(L)가
+        # 실제 사용자 잔액과 무관하게 항상 같은 가정 위에서만 계산되는 구조적 문제가
+        # 있었다(동학 지적, 2026-09-05). 이제 문장에서 잔액이 명시적으로 추출되면
+        # (action_interpreter.linked_balance_won) 프론트가 그 값을 body.linked_balance로
+        # 실어 보낸다 — 그 경우에만 실제 값을 쓰고, 그렇지 않으면 여전히 1억원을
+        # 가정하되 linked_balance_assumed=True로 명시해서 화면이 "가정값"이라고
+        # 보여줄 수 있게 한다(값을 만들어내되 숨기지 않는다는 원칙).
+        linked_balance_provided = body.get("linked_balance")
+        linked_balance_assumed = linked_balance_provided is None
+        linked_balance = linked_balance_provided if linked_balance_provided is not None else 100_000_000
         direct_benefit = body.get("direct_benefit_monthly", 0)
 
         by_id = {r["rule_id"]: r for r in qualifying_rules}
@@ -190,6 +200,10 @@ def api_evaluate():
                 "G": {"value": G_won, "unit": "원", "horizon_months": as_of_month},
                 "reversal": reversal,
                 "reversal_reason": reversal_reason,
+                # 2026-09-05: L(연쇄효과)·G·Financial Cliff는 전부 linked_balance(연계
+                # 계약 잔액)에 비례한다. 사용자가 실제 값을 안 줬으면(문장에 없었으면)
+                # 이 값이 가정값(기본 1억원)이라는 걸 화면이 숨기지 않고 보여줘야 한다.
+                "linked_balance": {"value": linked_balance, "unit": "원", "assumed": linked_balance_assumed},
             },
             "safety": {
                 "nominal_safe_limit": zone.nominal_safe_limit,

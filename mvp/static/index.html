@@ -196,6 +196,11 @@ const EXAMPLE_SCENARIOS = [
   '하나은행 오늘부터, 하나 적금에 가입해서 이력 우대금리 조건을 유지하고 있는데, 이번에 이 적금을 해지하려고 해',
 ];
 let exampleIdx = 0;
+// 2026-09-05: 문장에 "대출잔액 3천만원"처럼 연계 계약 잔액이 명시돼 있으면 interpret가
+// 뽑아준 값을 여기 저장해뒀다가 evaluate 요청에 그대로 실어 보낸다. 이 값이 없으면
+// evaluate 요청에도 아무 것도 안 실어 보내고, 서버가 기본 가정값(1억원)을 쓰면서
+// 그 사실을 assumed:true로 알려준다 — 프론트는 그 신호를 그대로 화면에 옮겨 적는다.
+let interpretedLinkedBalance = null;
 
 function updateExampleCounter() {
   document.getElementById('exampleCounter').textContent =
@@ -218,6 +223,7 @@ document.getElementById('exampleBtn').onclick = () => {
   document.getElementById('exceptionMet').checked = false;
   document.getElementById('interpretResult').innerHTML = '';
   document.getElementById('resultCard').style.display = 'none';
+  interpretedLinkedBalance = null;
 
   const el = document.getElementById('actionText');
   // 일반 .value 대입은 일부 브라우저/자동화 환경에서 input 이벤트를 놓칠 수 있어,
@@ -271,6 +277,12 @@ document.getElementById('interpretBtn').onclick = async () => {
       };
       autoSelect('institution', d.institution);
       autoSelect('product', d.product);
+      // 문장에 연계 계약 잔액(대출잔액 등)이 명시돼 있으면 저장해둔다 — 없으면(null)
+      // interpretedLinkedBalance는 그대로 null로 두고, evaluate가 서버 기본 가정값을
+      // 쓰게 한다(추측해서 채우지 않는다).
+      if (d.linked_balance_won !== null && d.linked_balance_won !== undefined) {
+        interpretedLinkedBalance = d.linked_balance_won;
+      }
     }
   } catch (e) {
     box.innerHTML = `<div class="interpret-box ERROR">해석 요청 중 문제가 발생했습니다. 아래 2번 항목에서 직접 입력해 주세요.</div>`;
@@ -329,8 +341,12 @@ document.getElementById('evaluateBtn').onclick = async () => {
 
   let data;
   try {
+    const payload = {action_type, institution, product, amount_monthly, direct_benefit_monthly, exception_condition_met};
+    // interpretedLinkedBalance가 있을 때만 실어 보낸다 — 안 실어 보내면 서버가 기본
+    // 가정값(1억원)을 쓰면서 그 사실을 응답의 effects.linked_balance.assumed로 알려준다.
+    if (interpretedLinkedBalance !== null) payload.linked_balance = interpretedLinkedBalance;
     const res = await fetch('/api/evaluate', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({action_type, institution, product, amount_monthly, direct_benefit_monthly, exception_condition_met})});
+      body: JSON.stringify(payload)});
     if (!res.ok) throw new Error('server_error');
     data = await res.json();
   } catch (e) {
@@ -429,6 +445,16 @@ document.getElementById('evaluateBtn').onclick = async () => {
   html += `</div>`;
   if (effects.D !== null && effects.D !== undefined && cliff && effects.D.horizon_months !== cliff.horizon_months) {
     html += `<div class="note">위 D/L/G는 ${effects.D.horizon_months}개월 시점 기준, 8번 Financial Cliff는 ${cliff.horizon_months}개월 시점 기준입니다 — 기준 시점이 달라 숫자가 차이 날 수 있습니다(계산 오류 아님).</div>`;
+  }
+  // 2026-09-05: 연쇄효과(L)·전체효과(G)·Financial Cliff는 전부 "연계 계약 잔액"에
+  // 비례해서 계산된다. 문장에 실제 잔액이 없어 서버가 기본 가정값(1억원)을 썼다면,
+  // 그 숫자가 사용자의 실제 상황을 반영한 값이 아니라는 걸 반드시 밝힌다 — 밝히지
+  // 않으면 실제 값처럼 보여서 오해를 준다.
+  const lb = effects.linked_balance;
+  if (lb && lb.assumed) {
+    html += `<div class="note">위 연쇄효과(L)·전체효과(G)·Financial Cliff는 실제 연계 계약(대출 등) 잔액을 입력받지 못해 <b>가정값 ${lb.value.toLocaleString()}원</b>을 기준으로 계산됐습니다 — 실제 잔액이 다르면 이 숫자들도 그만큼 달라집니다. 문장에 "대출잔액 OOO원"처럼 실제 잔액을 포함하면 그 값으로 계산합니다.</div>`;
+  } else if (lb && !lb.assumed) {
+    html += `<div class="note">위 연쇄효과(L)·전체효과(G)·Financial Cliff는 문장에서 인식한 실제 연계 계약 잔액 ${lb.value.toLocaleString()}원 기준으로 계산됐습니다.</div>`;
   }
 
   // 10. Action Reversal — FIX-4: 상단 판정 사유(위 reasonText, TTR 기준 "누적 전체효과
