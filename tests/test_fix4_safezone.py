@@ -179,6 +179,31 @@ check("새 상품 비교: engine/decide 판정 로직은 그대로 — 비교 �
       r_compare_better["decision"] == r_no_compare["decision"]
       and r_compare_better["reason"] == r_no_compare["reason"])
 
+# ---------------------------------------------------------------------------
+# 2026-09-05 (동학 요청 2차): "퍼센트 계산할 땐 판정 로직은 없냐" — net_effect_pct_p의
+# 부호만으로 ADVANTAGEOUS/DISADVANTAGEOUS/EQUAL 3갈래 판정을 매긴다. 이 판정은
+# decision(PASS/HOLD)과는 완전히 다른 축이므로 위 테스트가 이미 decision 불변을
+# 검증했고, 여기서는 verdict 필드 자체의 3갈래 정확성만 확인한다.
+# ---------------------------------------------------------------------------
+check("경제적 효과 판정: 새 상품 금리가 상실폭보다 크면 ADVANTAGEOUS",
+      r_compare_better["condition"]["net_effect_verdict"] == "ADVANTAGEOUS")
+
+r_compare_worse = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
+                                                       "exception_condition_met": False,
+                                                       "new_product_rate_pct": 0.01}).get_json()
+check("경제적 효과 판정: 새 상품 금리가 상실폭보다 작으면 DISADVANTAGEOUS",
+      r_compare_worse["condition"]["net_effect_verdict"] == "DISADVANTAGEOUS")
+
+_lost_for_equal = r_no_compare["condition"]["lost_pct_p"]
+r_compare_equal = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
+                                                       "exception_condition_met": False,
+                                                       "new_product_rate_pct": _lost_for_equal}).get_json()
+check("경제적 효과 판정: 새 상품 금리가 상실폭과 정확히 같으면 EQUAL",
+      _lost_for_equal is not None and r_compare_equal["condition"]["net_effect_verdict"] == "EQUAL")
+
+check("경제적 효과 판정: 비교 입력이 없으면 net_effect_verdict도 null(값 지어내지 않음)",
+      r_no_compare["condition"]["net_effect_verdict"] is None)
+
 print(f"\n{passed} passed, {failed} failed")
 if failed:
     raise SystemExit(1)

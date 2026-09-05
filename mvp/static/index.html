@@ -61,7 +61,9 @@
   .badge.PASS, .badge.SAFE { background:var(--good-sf); color:var(--good); }
   .badge.REVIEW, .badge.WARNING { background:var(--warn-sf); color:var(--warn); }
   .badge.HOLD, .badge.EXECUTION_BLOCKED, .badge.BREACH { background:var(--crit-sf); color:var(--crit); }
-  .badge.NOT_APPLICABLE { background:var(--surface-2); color:var(--ink-3); }
+  .badge.NOT_APPLICABLE, .badge.EQUAL { background:var(--surface-2); color:var(--ink-3); }
+  .badge.ADVANTAGEOUS { background:var(--good-sf); color:var(--good); }
+  .badge.DISADVANTAGEOUS { background:var(--crit-sf); color:var(--crit); }
 
   .subhead { font-size:11px; font-weight:700; color:var(--ink-3); text-transform:uppercase;
     letter-spacing:.05em; margin:20px 0 9px; }
@@ -434,18 +436,25 @@ document.getElementById('evaluateBtn').onclick = async () => {
     if (condition.new_product_rate_pct !== null && condition.new_product_rate_pct !== undefined) {
       html += `<div class="subhead">3-1. 새 상품과 비교 (참고용)</div><div class="stat-grid">`;
       html += statCard('새로 가입하려는 상품 금리', condition.new_product_rate_pct + '%');
+      // 2026-09-05(동학): "퍼센트 비교할 때 판정 로직은 없냐" — 부호(net_effect_pct_p)만
+      // 보고 텍스트로 풀어쓰던 것을 서버가 계산한 net_effect_verdict 배지로 명시한다.
+      // 이 배지는 위반 여부(PASS/HOLD)와는 완전히 다른 축이다 — "경제적으로 유리하다"가
+      // "위반이 아니다"를 의미하지 않는다. 아래에 조건 위반 배지를 별도로 계속 보여준다.
+      const NET_VERDICT_LABEL = {
+        ADVANTAGEOUS: '유리 (새 상품이 이득)',
+        DISADVANTAGEOUS: '불리 (기존 상품 유지가 이득)',
+        EQUAL: '동일 (차이 없음)',
+      };
       if (condition.net_effect_pct_p !== null && condition.net_effect_pct_p !== undefined) {
         const net = condition.net_effect_pct_p;
-        let netText;
-        if (net > 0) netText = `+${net}%p 이득 (새 상품이 유리)`;
-        else if (net < 0) netText = `${net}%p 손해 (기존 상품 유지가 유리)`;
-        else netText = '±0%p (동일)';
-        html += statCard('순 효과', netText);
+        const sign = net > 0 ? '+' : '';
+        html += statCard('순 효과', `${sign}${net}%p`);
+        html += statCard('경제적 효과 판정', `<span class="badge ${condition.net_effect_verdict}">${NET_VERDICT_LABEL[condition.net_effect_verdict] || condition.net_effect_verdict}</span>`);
       } else {
         html += statCard('순 효과', '비교 불가 (기존 우대폭을 확인할 수 없음)');
       }
       html += `</div>`;
-      html += `<div class="note">${condition.net_effect_note || '원금이 동일하다고 가정한 단순 %p 비교(참고용)입니다.'}</div>`;
+      html += `<div class="note">${condition.net_effect_note || '원금이 동일하다고 가정한 단순 %p 비교(참고용)입니다.'} 이 판정은 "행동이 조건을 위반하는지"와는 별개입니다 — 위반 여부는 위 "${dLabel.noun} 시 영향"과 아래 "현재 행동 위치"를 기준으로 확인하세요.</div>`;
     }
   }
 

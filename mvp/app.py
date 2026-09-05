@@ -268,8 +268,21 @@ def api_evaluate():
         except (TypeError, ValueError):
             new_product_rate_pct = None
     net_effect_pct_p = None
+    net_effect_verdict = None
     if new_product_rate_pct is not None and discrete.effect_lost_pct_p is not None:
         net_effect_pct_p = round(new_product_rate_pct - discrete.effect_lost_pct_p, 4)
+        # 2026-09-05 (동학 요청): "퍼센트 비교할 때 판정 로직은 없냐" — net_effect_pct_p의
+        # 부호만으로 결정되는 순수 파생값이다(새 계산 아님, if/else 3갈래뿐). 이 판정은
+        # 어디까지나 "경제적으로 어느 쪽이 유리한가"이지, 위반 여부(decision/PASS·HOLD)와는
+        # 전혀 다른 축이다 — 절대로 decision/reason에 영향을 주지 않는다(아래 test_fix4_
+        # safezone.py의 "decision/reason은 안 바뀜" 회귀 테스트로 고정해둠). "경제적으로
+        # 유리하니 위반해도 된다"처럼 두 판정을 섞으면 안 되기 때문에 별도 필드로만 노출한다.
+        if net_effect_pct_p > 0:
+            net_effect_verdict = "ADVANTAGEOUS"
+        elif net_effect_pct_p < 0:
+            net_effect_verdict = "DISADVANTAGEOUS"
+        else:
+            net_effect_verdict = "EQUAL"
     dlg = None
     evidence = [{"rule_id": rule["rule_id"], "source_url": rule["source_url"], "verified_at": rule["verified_at"]}]
     rule_effect_pct_p = rule.get("effect_pct_p") or (rule.get("tiers", [{}])[0].get("effect_pct_p") if rule.get("tiers") else None)
@@ -285,6 +298,7 @@ def api_evaluate():
             "exception_applied": discrete.exception_applied,
             "new_product_rate_pct": new_product_rate_pct,
             "net_effect_pct_p": net_effect_pct_p,
+            "net_effect_verdict": net_effect_verdict,  # ADVANTAGEOUS | DISADVANTAGEOUS | EQUAL | null — decision과 무관
             "net_effect_note": "원금이 동일하다고 가정한 단순 %p 비교(참고용) — 실제로는 원금·기간·과세 방식에 따라 달라질 수 있습니다.",
         },
         "safety": {
