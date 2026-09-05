@@ -105,6 +105,23 @@ fake_product = _store.match("CARD_SPEND_SHIFT", product="존재하지않는상�
 check("존재하지 않는 product를 줘도 0건이 아니라 전체 후보로 안전하게 fallback",
       len(fake_product) > 0)
 
+# ---------------------------------------------------------------------------
+# 2026-09-05 (FINAL_HARDENING Red-Team, P0-4): 실제 라이브(OpenAI)에서 "적금 하나
+# 해지하려고 해"처럼 기관/상품이 특정 안 된 문장에 status="UNSUPPORTED"이면서
+# action_type="PRODUCT_TERMINATION"을 같이 채우는 모순 응답이 재현됐다. 이 상태를
+# 그대로 두면 화면이 action_type을 자동 채워 넣고, institution/product 없이
+# evaluate가 rule_store의 "전체 후보 fallback"으로 임의의 규칙을 골라 확정 판정
+# (HOLD 등)까지 내려버린다 — 사용자가 지정한 적 없는 상품에 대한 그럴듯한 오판.
+# _double_check()가 이 모순을 무조건 걸러내는지 직접 검증한다(mock/실제 provider
+# 여부와 무관하게 항상 적용되는 방어선이므로 함수를 직접 호출해서 검증).
+from action_interpreter import _double_check
+
+contradictory = {"status": "UNSUPPORTED", "action_type": "PRODUCT_TERMINATION",
+                 "amount_monthly": None, "direct_benefit_monthly": None, "clarifying_question": None}
+fixed = _double_check(contradictory)
+check("P0-4: status=UNSUPPORTED + action_type 동시 존재(AI 모순 응답) → action_type을 무조건 제거",
+      fixed["action_type"] is None and fixed["status"] == "UNSUPPORTED")
+
 print(f"\n{passed} passed, {failed} failed")
 if failed:
     raise SystemExit(1)

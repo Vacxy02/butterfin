@@ -252,6 +252,24 @@ def api_evaluate():
     # (동학, 2026-09-05)의 실제 원인. 새로 값을 만들어내는 게 아니라 엔진이 이미
     # 계산해서 버리던 값을 그대로 노출하는 것뿐이라 판정 로직(decide/evaluate_discrete_
     # rule) 자체는 한 글자도 바꾸지 않았다.
+    #
+    # 2026-09-05 (동학 요청): "적금 해지하면 새로 가입하려는 적금이 있을 텐데, 그
+    # 상품 금리를 넣으면 이득/손해를 비교해달라" — 원금이 동일하다는 전제 하에
+    # 사용자가 직접 입력한 새 상품 금리(new_product_rate_pct)와, 엔진이 이미 계산한
+    # lost_pct_p(위반 시 사라지는 우대폭)를 단순 뺄셈으로 비교만 한다. 새 상품의
+    # 실제 금리/원금/기간 데이터는 없으므로(지어낼 수 없으므로) 반드시 사용자가
+    # 직접 입력했을 때만 계산하고, 안 주면 null로 남긴다. AI 자동추출 대상이 아니다
+    # (엔진/규칙/판정 로직은 전혀 건드리지 않은 순수 부가 계산 — Freeze 무관).
+    new_product_rate_pct = None
+    raw_new_rate = body.get("new_product_rate_pct")
+    if raw_new_rate is not None:
+        try:
+            new_product_rate_pct = float(raw_new_rate)
+        except (TypeError, ValueError):
+            new_product_rate_pct = None
+    net_effect_pct_p = None
+    if new_product_rate_pct is not None and discrete.effect_lost_pct_p is not None:
+        net_effect_pct_p = round(new_product_rate_pct - discrete.effect_lost_pct_p, 4)
     dlg = None
     evidence = [{"rule_id": rule["rule_id"], "source_url": rule["source_url"], "verified_at": rule["verified_at"]}]
     rule_effect_pct_p = rule.get("effect_pct_p") or (rule.get("tiers", [{}])[0].get("effect_pct_p") if rule.get("tiers") else None)
@@ -265,6 +283,9 @@ def api_evaluate():
             "baseline_effect_pct_p": rule_effect_pct_p,
             "lost_pct_p": discrete.effect_lost_pct_p,
             "exception_applied": discrete.exception_applied,
+            "new_product_rate_pct": new_product_rate_pct,
+            "net_effect_pct_p": net_effect_pct_p,
+            "net_effect_note": "원금이 동일하다고 가정한 단순 %p 비교(참고용) — 실제로는 원금·기간·과세 방식에 따라 달라질 수 있습니다.",
         },
         "safety": {
             "nominal_safe_limit": None, "robust_safe_limit": None, "robust_status": "NOT_APPLICABLE",

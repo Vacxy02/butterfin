@@ -147,6 +147,38 @@ check("FIX-1: NOT_APPLICABLE 라벨이 'nominal과 동일'이라고 명확히 �
 check("FIX-2: index.html이 warning_status를 실제로 참조함(숫자 구간을 무조건 찍지 않음)",
       "warning_status" in _index_html)
 
+# ---------------------------------------------------------------------------
+# 2026-09-05(동학 요청): "해지 후 새로 가입할 상품 금리를 입력하면 이득/손해 비교"
+# — 원금이 같다고 가정한 단순 %p 비교. 사용자가 값을 안 주면 계산을 생략(지어내지
+# 않음), 판정 로직(decide/evaluate_discrete_rule)은 전혀 건드리지 않은 부가 계산.
+# ---------------------------------------------------------------------------
+r_no_compare = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
+                                                    "exception_condition_met": False}).get_json()
+check("새 상품 비교: 금리를 안 주면 new_product_rate_pct/net_effect_pct_p가 모두 null(비교 생략, 값 지어내지 않음)",
+      r_no_compare["condition"]["new_product_rate_pct"] is None
+      and r_no_compare["condition"]["net_effect_pct_p"] is None)
+
+r_compare_better = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
+                                                        "exception_condition_met": False,
+                                                        "new_product_rate_pct": 5.0}).get_json()
+_lost = r_compare_better["condition"]["lost_pct_p"]
+check("새 상품 비교: 새 상품 금리(5.0%) - 상실폭(lost_pct_p) = net_effect_pct_p (단순 뺄셈, 새 계산식 아님)",
+      _lost is not None
+      and r_compare_better["condition"]["net_effect_pct_p"] == round(5.0 - _lost, 4))
+check("새 상품 비교: 새 상품 금리가 상실폭보다 크면(순효과 > 0) 이득 방향으로 계산됨",
+      r_compare_better["condition"]["net_effect_pct_p"] > 0)
+
+r_compare_bad_input = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
+                                                           "exception_condition_met": False,
+                                                           "new_product_rate_pct": "not_a_number"}).get_json()
+check("새 상품 비교: 숫자로 변환 안 되는 값이 오면 크래시 대신 비교를 생략함(null)",
+      r_compare_bad_input["condition"]["new_product_rate_pct"] is None
+      and r_compare_bad_input["condition"]["net_effect_pct_p"] is None)
+
+check("새 상품 비교: engine/decide 판정 로직은 그대로 — 비교 입력이 있어도 decision/reason은 안 바뀜",
+      r_compare_better["decision"] == r_no_compare["decision"]
+      and r_compare_better["reason"] == r_no_compare["reason"])
+
 print(f"\n{passed} passed, {failed} failed")
 if failed:
     raise SystemExit(1)

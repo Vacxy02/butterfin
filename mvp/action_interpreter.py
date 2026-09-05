@@ -261,7 +261,22 @@ def _mock_interpret(text: str) -> Dict[str, Any]:
 
 
 def _double_check(d: Dict[str, Any]) -> Dict[str, Any]:
-    """AI가 OK라고 해도 그대로 믿지 않는다 — 명백히 이상한 값은 NEED_INFO로 강등."""
+    """AI가 OK라고 해도 그대로 믿지 않는다 — 명백히 이상한 값은 NEED_INFO로 강등.
+
+    2026-09-05 (FINAL_HARDENING Red-Team, P0-4 발견): "적금 하나 해지하려고 해"처럼
+    기관/상품이 전혀 특정되지 않은 문장에서 AI가 status="UNSUPPORTED"라고 스스로
+    판단하면서도 action_type="PRODUCT_TERMINATION"을 같이 채워 보내는 모순 응답이
+    실제로 재현됐다. status가 OK일 때만 action_type을 검증하던 기존 코드는 이 경우를
+    안 걸러서, 화면(index.html interpretBtn)이 status와 무관하게 action_type이 있으면
+    무조건 2번 항목 드롭다운을 자동 채움 → 사용자가 그대로 "검증 실행"을 누르면
+    institution/product 없이 evaluate가 rule_store의 "전체 후보 fallback"으로 아무
+    매칭 규칙이나 하나 골라 HOLD/PASS를 확정 판정해버리는 결과로 이어졌다(실제
+    재현: institution 없이 PRODUCT_TERMINATION만 보내면 KB_SAVINGS_LOAN_HOLD가
+    임의로 선택되어 HOLD가 나옴 — 사용자가 명시한 적 없는 상품에 대한 판정).
+    UNSUPPORTED는 정의상 "4가지 유형 중 어디에도 안 맞는다"는 뜻이므로, 이 상태에서는
+    action_type을 절대 남기지 않는다(모순 자체를 원천 차단)."""
+    if d.get("status") == "UNSUPPORTED":
+        return {**d, "action_type": None}
     if d.get("status") == "OK":
         amt = d.get("amount_monthly")
         if d.get("action_type") == "CARD_SPEND_SHIFT" and (amt is None or amt <= 0):
