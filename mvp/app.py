@@ -244,14 +244,28 @@ def api_evaluate():
     # 이 유형(해지/계좌변경 등 이산 판정)은 engine.py에 금액 환산 모델도, Safe Zone
     # 개념도 없다(수학 v1.2 명세는 1차원 연속 행동만 다룬다) — DiscreteEffect는 %p
     # 우대 상실만 판정한다. 값을 모르면 지어내지 않고 null/NOT_APPLICABLE로 남긴다.
+    #
+    # 2026-09-05: evaluate_discrete_rule()이 이미 계산해주는 rule_effect_pct_p(현재
+    # 유지 중인 우대폭)·discrete.effect_lost_pct_p(위반 시 사라지는 폭)를 지금까지는
+    # 응답에 아예 안 실어서 화면이 PASS/HOLD 배지만 보고 "얼마나"를 알 수 없었다 —
+    # CARD_SPEND_SHIFT만 숫자가 풍부하고 나머지 3개 유형은 밋밋해 보인다는 지적
+    # (동학, 2026-09-05)의 실제 원인. 새로 값을 만들어내는 게 아니라 엔진이 이미
+    # 계산해서 버리던 값을 그대로 노출하는 것뿐이라 판정 로직(decide/evaluate_discrete_
+    # rule) 자체는 한 글자도 바꾸지 않았다.
     dlg = None
     evidence = [{"rule_id": rule["rule_id"], "source_url": rule["source_url"], "verified_at": rule["verified_at"]}]
+    rule_effect_pct_p = rule.get("effect_pct_p") or (rule.get("tiers", [{}])[0].get("effect_pct_p") if rule.get("tiers") else None)
     return jsonify({
         **result,
         "matched_rules": [rule["rule_id"]],
         "action": {"type": action_type, "amount": None, "unit": None},
         "effects": {"D": None, "L": None, "G": None, "reversal": discrete.violation,
                     "reversal_reason": discrete.reason},
+        "condition": {
+            "baseline_effect_pct_p": rule_effect_pct_p,
+            "lost_pct_p": discrete.effect_lost_pct_p,
+            "exception_applied": discrete.exception_applied,
+        },
         "safety": {
             "nominal_safe_limit": None, "robust_safe_limit": None, "robust_status": "NOT_APPLICABLE",
             "robust_safe_zone": {"min": None, "max": None},
