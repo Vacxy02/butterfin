@@ -156,8 +156,19 @@ def api_evaluate():
             result = decide(freshness_ok=freshness_ok, inputs_sufficient=False, rule_matched=True)
             return jsonify({**result, "matched_rules": [r["rule_id"] for r in qualifying_rules]})
 
-        hist3 = body.get("hist3") or DEFAULT_HIST3
-        baseline = body.get("baseline_monthly") or DEFAULT_BASELINE
+        # 2026-09-05 (V5 Surgical, BLOCKER 7): Safe Zone/TTB/TTR 계산의 핵심 입력인
+        # hist3(최근 3개월 카드실적)와 baseline_monthly(향후 월 실적 가정)는 지금까지
+        # 사용자가 안 주면 조용히 대표 시나리오값(22만원 x3, 22만원)을 썼다 — 화면에는
+        # 그 사실이 전혀 드러나지 않아서, "Safe Zone 0~2만원"이 어디서 나온 숫자인지
+        # 심사위원이 알 수 없었다(README V5 BLOCKER 7). linked_balance_assumed와 같은
+        # 패턴으로, 대표 시나리오값을 썼는지 여부를 hist3_assumed/baseline_assumed로
+        # 명시해서 결과에 함께 실어 보낸다.
+        hist3_provided = body.get("hist3")
+        hist3_assumed = not hist3_provided
+        hist3 = hist3_provided or DEFAULT_HIST3
+        baseline_provided = body.get("baseline_monthly")
+        baseline_assumed = not baseline_provided
+        baseline = baseline_provided or DEFAULT_BASELINE
         # 2026-09-05: linked_balance(연계 계약 잔액)는 지금까지 화면이 아예 보내주는
         # 값이 없어서 매번 아래 기본값(1억원)을 무조건 썼다 — 그 결과 연쇄효과(L)가
         # 실제 사용자 잔액과 무관하게 항상 같은 가정 위에서만 계산되는 구조적 문제가
@@ -238,6 +249,9 @@ def api_evaluate():
                 # 계약 잔액)에 비례한다. 사용자가 실제 값을 안 줬으면(문장에 없었으면)
                 # 이 값이 가정값(기본 1억원)이라는 걸 화면이 숨기지 않고 보여줘야 한다.
                 "linked_balance": {"value": linked_balance, "unit": "원", "assumed": linked_balance_assumed},
+                "hist3": {"value": hist3, "unit": "원", "assumed": hist3_assumed},
+                "baseline_monthly": {"value": baseline, "unit": "원", "assumed": baseline_assumed},
+                "scenario_note": "대표 시나리오 가정: 최근 3개월 카드실적 22만원/22만원/22만원, 향후 월 22만원 (미입력 시 사용)",
             },
             "safety": {
                 "nominal_safe_limit": zone.nominal_safe_limit,
@@ -266,6 +280,46 @@ def api_evaluate():
         })
 
     # PRODUCT_TERMINATION / PAYMENT_ACCOUNT_CHANGE / SALARY_ACCOUNT_CHANGE — 이산 판정
+    #
+    # 2026-09-05 (V5 Surgical, BLOCKER 1 / F02): 예전엔 institution/product를 안 줘서
+    # (혹은 줘도) 후보가 여러 개 남으면 그냥 matched[0](배열 순서상 첫 번째)을 골라서
+    # "그 계약"이라고 확정 판정(HOLD/PASS)했다 — 사용자가 실제로 어떤 계약을 말한
+    # 건지 한 번도 확인하지 않고 임의로 하나를 골라 confident한 결과를 내는 위험한
+    # 동작이었다(독립감사 F02). 이제 후보가 정확히 1개일 때만 자동판정하고, 2개
+    # 이상이면 "어떤 계약인지 특정해달라"는 REVIEW로 fail-closed한다. 예전 "상품
+    # 미지정 해지 → KB 규칙 HOLD" 같은 골든 데모가 이 변경으로 깨질 수 있는데, 이는
+    # 알고 하는 것이다(동학 2026-09-05 명시적 지시: "오래된 골든 데모를 보존하려고
+    # P0를 남기지 마") — 그 데모는 새 동작(REVIEW+후보목록)에 맞춰 문서를 다시 쓴다.
+    if len(matched) > 1:
+        candidates = [
+            {"rule_id": r["rule_id"], "institution": r.get("institution"), "product": r.get("product")}
+            for r in matched
+        ]
+        return jsonify({
+            "decision": "REVIEW",
+            "reason": ("이 행동에 해당하는 등록 규칙이 여러 건(" + str(len(matched)) + "건) 있어 "
+                       "어떤 계약인지 자동으로 특정할 수 없습니다. 은행/상품명을 함께 알려주세요."),
+            "matched_rules": [r["rule_id"] for r in matched],
+            "candidates": candidates,
+            "action": {"type": action_type, "amount": None, "unit": None},
+            "effects": {"D": None, "L": None, "G": None, "reversal": False,
+                        "reversal_reason": "여러 계약 후보 중 하나로 특정되지 않아 판정을 계산하지 않았습니다."},
+            "condition": None,
+            "safety": {
+                "nominal_safe_limit": None, "robust_safe_limit": None, "robust_status": "NOT_APPLICABLE",
+                "robust_safe_zone": {"min": None, "max": None},
+                "warning_zone": {"min_exclusive": None, "max_inclusive": None}, "warning_status": "NOT_APPLICABLE",
+                "current_zone": "NOT_APPLICABLE", "binding_constraints": [],
+                "financial_cliff": None, "cliff_status": "NOT_APPLICABLE",
+                "optimal_safe_range": None, "optimal_status": "NOT_APPLICABLE",
+            },
+            "time": {"TTB": None, "TTR": None, "unit": None},
+            "evidence": [],
+            "engine_meta": {"engine_version": ENGINE_VERSION, "rule_ledger_hash": RULE_LEDGER_HASH},
+            "dlg": None,
+            "action_reversal": False,
+        })
+
     rule = matched[0]
 
     # 2026-09-05 (독립감사 F16 — 인과관계 재검증): HANA_HISTORY_SAVINGS의 원장 metric은
@@ -277,21 +331,28 @@ def api_evaluate():
     # 아니라 오히려 근거 없는 HOLD(false HOLD)를 없애는 수정이다. 다른 7개 규칙에는
     # 영향 없음(이 규칙만 가입 전 확정 이력이라는 특수 구조라 별도 처리가 맞다).
     if rule["rule_id"] == "HANA_HISTORY_SAVINGS":
-        reason = ("이 우대조건은 가입 전일 기준 6개월간의 보유 이력으로, 가입 시점에 이미 "
-                  "확정됐습니다. 지금 이 상품을 해지해도 그 과거 이력 자체는 바뀌지 않으므로 "
-                  "이 조건은 이 행동으로 훼손될 수 없습니다(인과관계상 영향 없음).")
+        # 2026-09-05 (V5 Surgical, BLOCKER 5): 인과관계 판정(이 규칙 자체는 현재
+        # 해지행동의 영향을 받지 않는다) 자체는 여전히 맞다 — 가입 전 6개월 이력은
+        # 이미 확정된 과거 사실이라 지금 해지로는 바뀌지 않는다. 문제는 예전 코드가
+        # 이걸 "decision": "PASS"로 서비스 전체 판정을 내렸다는 점이다 — 해지에는
+        # 이 규칙 하나 말고도 다른 손익/조건이 있을 수 있는데, 전역 PASS는 "이 해지가
+        # 전반적으로 안전하다"는 오해를 줄 수 있다(독립감사 F16 재검토, 동학 2026-09-05
+        # 지시: "이 규칙을 데모 다양성을 위해 억지 PASS 사례로 쓰지 말 것"). 이제는
+        # 이 규칙만 NOT_AFFECTED로 표시하고 decision은 REVIEW로 낮춰서, "이 조건은
+        # 안전하지만 해지 전체를 검증한 건 아니다"를 명확히 한다.
+        reason = ("이 등록 규칙은 현재 해지행동의 영향을 받지 않습니다. 해지 전체 손익은 "
+                  "현재 지원범위에서 검증하지 않았습니다.")
         return jsonify({
-            "decision": "PASS", "reason": reason,
+            "decision": "REVIEW", "reason": reason,
             "matched_rules": [rule["rule_id"]],
             "action": {"type": action_type, "amount": None, "unit": None},
             "effects": {"D": None, "L": None, "G": None, "reversal": False,
-                        "reversal_reason": "D/G를 계산하지 않는 이산 조건이며, 이 조건은 애초에 이 행동으로 훼손될 수 없습니다."},
+                        "reversal_reason": "D/G를 계산하지 않는 이산 조건이며, 이 조건 자체는 이 행동으로 훼손될 수 없습니다."},
             "condition": {
                 "baseline_effect_pct_p": rule.get("effect_pct_p"),
                 "lost_pct_p": None,
                 "exception_applied": False,
-                "new_product_rate_pct": None, "net_effect_pct_p": None, "net_effect_verdict": None,
-                "net_effect_note": None,
+                "rule_status": "NOT_AFFECTED",
                 "causal_note": "가입 전 이력 조건 — 현재 행동으로는 훼손 불가(2026-09-05 독립감사 반영)",
             },
             "safety": {
@@ -309,7 +370,57 @@ def api_evaluate():
             "action_reversal": False,
         })
 
-    exception_met = bool(body.get("exception_condition_met", False))
+    # 2026-09-05 (V5 Surgical, BLOCKER 2 / F04): 예전엔 rule에 실제 "exception"이
+    # 있든 없든 exception_condition_met=true라는 체크값만 오면 무조건 PASS로 갈 수
+    # 있었다 — 예를 들어 SHINHYUP_SALARY나 KB_SAVINGS_LOAN_HOLD처럼 rule.exception
+    # 필드 자체가 없는(=행동을 면제해주는 공식 예외가 존재하지 않는) 규칙에도 체크값
+    # 하나로 면제를 줄 수 있는 구조였다(독립감사 F04, 동학 2026-09-05 지시: "기존
+    # '급여계좌 변경 + 아무 예외 체크 → PASS' 데모는 폐기한다"). 이제는 rule에 실제
+    # exception 텍스트가 있을 때만(bool(rule.get("exception"))) 체크값이 의미를
+    # 갖는다 — exception이 없는 규칙은 체크값이 와도 무시한다.
+    rule_has_real_exception = bool(rule.get("exception"))
+    exception_met = bool(body.get("exception_condition_met", False)) and rule_has_real_exception
+
+    # 2026-09-05 (V5 Surgical, BLOCKER 6): HF_SUBSCRIPTION_DIDIMDOL은 tiers가
+    # 가입기간/납입회차별로 다른 효과(%p)를 갖는데, 사용자가 그 상태(가입기간/납입
+    # 회차)를 안 주면 예전엔 그냥 tiers[0]을 임의로 골라 확정 %p(0.3%p 등)를 보여줬다
+    # — 실제로는 어느 구간에 있는지 모르는 상태에서 특정 숫자를 내는 것은 근거 없는
+    # 확정 판정이다(README V5 BLOCKER 6). 공식 당첨해지 exception이 적용되는 경우는
+    # 그 예외 경로로 안전하게 처리하고(면제이므로 %p 특정이 필요 없음), 그 외
+    # 일반 해지는 가입기간/납입회차 정보가 없으면 정확한 %p를 내지 않고 REVIEW로
+    # "필요한 정보"를 안내한다.
+    if rule["rule_id"] == "HF_SUBSCRIPTION_DIDIMDOL" and not exception_met:
+        tier_state_given = body.get("enrollment_years") is not None or body.get("payment_count") is not None
+        if not tier_state_given:
+            reason = ("이 상품은 가입기간·납입회차에 따라 우대폭이 달라지는 구간형 규칙입니다. "
+                      "가입기간/납입회차 정보가 없어 정확한 상실 우대폭(%p)을 특정할 수 없습니다. "
+                      "해당 정보를 알려주시거나(가입기간, 납입회차), 목적물 당첨에 따른 해지라면 "
+                      "그 사유를 표시해주세요.")
+            return jsonify({
+                "decision": "REVIEW", "reason": reason,
+                "matched_rules": [rule["rule_id"]],
+                "action": {"type": action_type, "amount": None, "unit": None},
+                "effects": {"D": None, "L": None, "G": None, "reversal": False,
+                            "reversal_reason": "가입기간/납입회차 미확인으로 구간을 특정할 수 없어 %p를 계산하지 않았습니다."},
+                "condition": {
+                    "baseline_effect_pct_p": None, "lost_pct_p": None, "exception_applied": False,
+                    "review_note": "가입기간/납입회차 필요 — 임의로 tiers[0]을 선택하지 않습니다.",
+                },
+                "safety": {
+                    "nominal_safe_limit": None, "robust_safe_limit": None, "robust_status": "NOT_APPLICABLE",
+                    "robust_safe_zone": {"min": None, "max": None},
+                    "warning_zone": {"min_exclusive": None, "max_inclusive": None}, "warning_status": "NOT_APPLICABLE",
+                    "current_zone": "NOT_APPLICABLE", "binding_constraints": [rule["rule_id"]],
+                    "financial_cliff": None, "cliff_status": "NOT_APPLICABLE",
+                    "optimal_safe_range": None, "optimal_status": "NOT_APPLICABLE",
+                },
+                "time": {"TTB": None, "TTR": None, "unit": None},
+                "evidence": [{"rule_id": rule["rule_id"], "source_url": rule["source_url"], "verified_at": rule["verified_at"]}],
+                "engine_meta": {"engine_version": ENGINE_VERSION, "rule_ledger_hash": RULE_LEDGER_HASH},
+                "dlg": None,
+                "action_reversal": False,
+            })
+
     discrete = evaluate_discrete_rule(
         rule_effect_pct_p=rule.get("effect_pct_p") or (rule.get("tiers", [{}])[0].get("effect_pct_p") if rule.get("tiers") else None),
         action_removes_condition=True,
@@ -329,36 +440,19 @@ def api_evaluate():
     # 계산해서 버리던 값을 그대로 노출하는 것뿐이라 판정 로직(decide/evaluate_discrete_
     # rule) 자체는 한 글자도 바꾸지 않았다.
     #
-    # 2026-09-05 (동학 요청): "적금 해지하면 새로 가입하려는 적금이 있을 텐데, 그
-    # 상품 금리를 넣으면 이득/손해를 비교해달라" — 원금이 동일하다는 전제 하에
-    # 사용자가 직접 입력한 새 상품 금리(new_product_rate_pct)와, 엔진이 이미 계산한
-    # lost_pct_p(위반 시 사라지는 우대폭)를 단순 뺄셈으로 비교만 한다. 새 상품의
-    # 실제 금리/원금/기간 데이터는 없으므로(지어낼 수 없으므로) 반드시 사용자가
-    # 직접 입력했을 때만 계산하고, 안 주면 null로 남긴다. AI 자동추출 대상이 아니다
-    # (엔진/규칙/판정 로직은 전혀 건드리지 않은 순수 부가 계산 — Freeze 무관).
-    new_product_rate_pct = None
-    raw_new_rate = body.get("new_product_rate_pct")
-    if raw_new_rate is not None:
-        try:
-            new_product_rate_pct = float(raw_new_rate)
-        except (TypeError, ValueError):
-            new_product_rate_pct = None
-    net_effect_pct_p = None
-    net_effect_verdict = None
-    if new_product_rate_pct is not None and discrete.effect_lost_pct_p is not None:
-        net_effect_pct_p = round(new_product_rate_pct - discrete.effect_lost_pct_p, 4)
-        # 2026-09-05 (동학 요청): "퍼센트 비교할 때 판정 로직은 없냐" — net_effect_pct_p의
-        # 부호만으로 결정되는 순수 파생값이다(새 계산 아님, if/else 3갈래뿐). 이 판정은
-        # 어디까지나 "경제적으로 어느 쪽이 유리한가"이지, 위반 여부(decision/PASS·HOLD)와는
-        # 전혀 다른 축이다 — 절대로 decision/reason에 영향을 주지 않는다(아래 test_fix4_
-        # safezone.py의 "decision/reason은 안 바뀜" 회귀 테스트로 고정해둠). "경제적으로
-        # 유리하니 위반해도 된다"처럼 두 판정을 섞으면 안 되기 때문에 별도 필드로만 노출한다.
-        if net_effect_pct_p > 0:
-            net_effect_verdict = "ADVANTAGEOUS"
-        elif net_effect_pct_p < 0:
-            net_effect_verdict = "DISADVANTAGEOUS"
-        else:
-            net_effect_verdict = "EQUAL"
+    # 2026-09-05 (V5 Surgical, BLOCKER 3 — 제거): 이전에는 사용자가 입력한 새 상품
+    # 금리(new_product_rate_pct)와 엔진이 계산한 lost_pct_p(위반 시 사라지는 한
+    # 우대항목의 %p)를 단순 뺄셈(new_product_rate_pct - lost_pct_p)해서 "순 효과"로
+    # 보여줬다. 이 계산은 금융적으로 차원이 안 맞는다 — lost_pct_p는 "기존 계약의
+    # 우대조건 하나"가 사라지는 폭이고, new_product_rate_pct는 보통 "신규 상품의
+    # 전체 금리"이기 때문에, 서로 같은 기준의 값이 아니다(예: 기존 우대 0.1%p 상실
+    # vs 신규 상품 총금리 3.5% → "+3.4%p 유리"라는 결론은 틀린 비교다). 상품 간
+    # 원화 손익을 제대로 비교하려면 현재금리·신규금리·원금/잔액·남은기간·중도해지
+    # 조건 등이 모두 필요하고, 이는 이번 MVP 자동계산 범위를 벗어나므로(README V5
+    # BLOCKER 3, 동학 2026-09-05 지시) 이 기능 자체를 제거한다. 원금이 같다는 가정만
+    # 유지한 채 계산을 남기지 않는다 — 새 비교 모델은 이번 제출에서 만들지 않는다.
+    net_effect_note = ("상품 간 원화 손익 비교는 현재금리·신규금리·원금/잔액·남은기간·"
+                        "중도해지 조건 등이 필요해 현재 MVP 자동계산 범위가 아닙니다.")
     dlg = None
     evidence = [{"rule_id": rule["rule_id"], "source_url": rule["source_url"], "verified_at": rule["verified_at"]}]
     rule_effect_pct_p = rule.get("effect_pct_p") or (rule.get("tiers", [{}])[0].get("effect_pct_p") if rule.get("tiers") else None)
@@ -369,13 +463,18 @@ def api_evaluate():
         "effects": {"D": None, "L": None, "G": None, "reversal": discrete.violation,
                     "reversal_reason": discrete.reason},
         "condition": {
+            # 2026-09-05 (V5 Surgical, BLOCKER 4 / F17): "현재 유지 중인 우대폭"처럼
+            # 현재 자격상태를 확정하는 표현은 이 배포가 사용자가 실제로 그 우대를
+            # 지금 받고 있는지 한 번도 확인하지 않으면서도 확정적으로 들린다는
+            # 문제가 있었다(독립감사 F17). 필드명(baseline_effect_pct_p)은 기존
+            # 클라이언트/테스트 호환을 위해 유지하되, 화면 문구는 index.html에서
+            # "규칙상 우대폭(현재 적용 여부 미확인)"처럼 비확정 표현으로 바꾼다 —
+            # 이 note 필드가 그 비확정성을 API 레벨에서도 명시한다.
             "baseline_effect_pct_p": rule_effect_pct_p,
+            "baseline_effect_note": "규칙상 우대폭입니다 — 현재 실제로 이 우대를 받고 있는지는 확인하지 않았습니다.",
             "lost_pct_p": discrete.effect_lost_pct_p,
             "exception_applied": discrete.exception_applied,
-            "new_product_rate_pct": new_product_rate_pct,
-            "net_effect_pct_p": net_effect_pct_p,
-            "net_effect_verdict": net_effect_verdict,  # ADVANTAGEOUS | DISADVANTAGEOUS | EQUAL | null — decision과 무관
-            "net_effect_note": "원금이 동일하다고 가정한 단순 %p 비교(참고용) — 실제로는 원금·기간·과세 방식에 따라 달라질 수 있습니다.",
+            "net_effect_note": net_effect_note,
         },
         "safety": {
             "nominal_safe_limit": None, "robust_safe_limit": None, "robust_status": "NOT_APPLICABLE",

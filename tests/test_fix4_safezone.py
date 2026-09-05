@@ -91,7 +91,13 @@ check("FIX-3: 이 케이스는 TTR(2개월)<cliff horizon(12개월) → 두 hori
 
 # 이산 판정(PRODUCT_TERMINATION) 경로는 D/L/G가 여전히 순수 None이어야 한다(구버전
 # 회귀 test_safezone_v12.py #16과 동일 계약 — 여기서는 financial_cliff도 같이 확인).
+# 2026-09-05 (V5 Surgical, BLOCKER 1): PRODUCT_TERMINATION만 주고 institution/product를
+# 안 주면 이제 후보가 3개(KB_SAVINGS_LOAN_HOLD/HF_SUBSCRIPTION_DIDIMDOL/HANA_HISTORY_
+# SAVINGS)라 REVIEW로 fail-closed한다 — 단일 후보로 좁히려면 institution/product를
+# 함께 줘야 한다(KB_SAVINGS_LOAN_HOLD 하나만 남도록).
 r_discrete = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
+                                                 "institution": "KB국민은행",
+                                                 "product": "대출 금리감면 (일반 신용대출)",
                                                  "exception_condition_met": False}).get_json()
 check("FIX-3: 이산 판정 유형은 effects.D가 객체가 아니라 그대로 None (금액 모델 자체가 없음)",
       r_discrete["effects"]["D"] is None)
@@ -148,61 +154,22 @@ check("FIX-2: index.html이 warning_status를 실제로 참조함(숫자 구간�
       "warning_status" in _index_html)
 
 # ---------------------------------------------------------------------------
-# 2026-09-05(동학 요청): "해지 후 새로 가입할 상품 금리를 입력하면 이득/손해 비교"
-# — 원금이 같다고 가정한 단순 %p 비교. 사용자가 값을 안 주면 계산을 생략(지어내지
-# 않음), 판정 로직(decide/evaluate_discrete_rule)은 전혀 건드리지 않은 부가 계산.
-# ---------------------------------------------------------------------------
+# 2026-09-05 (V5 Surgical, BLOCKER 3 — 제거): "새 상품 금리 비교"(new_product_rate_pct
+# - lost_pct_p = net_effect_pct_p) 기능은 금융적으로 차원이 안 맞는 계산이었다
+# (기존 계약 한 우대조건의 상실폭 %p와 신규 상품의 전체 금리 %를 단순 비교) —
+# README V5 BLOCKER 3 지시에 따라 기능 자체를 제거했다. 이 기능을 검증하던 테스트
+# 블록(구 F14)도 함께 삭제한다 — 더 이상 존재하지 않는 API 필드를 검증할 수 없다.
+# 새 비교 모델은 이번 제출 범위 밖이다(README: "새 cashflow 모델... 하지 말 것").
 r_no_compare = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
+                                                    "institution": "KB국민은행",
+                                                    "product": "대출 금리감면 (일반 신용대출)",
                                                     "exception_condition_met": False}).get_json()
-check("새 상품 비교: 금리를 안 주면 new_product_rate_pct/net_effect_pct_p가 모두 null(비교 생략, 값 지어내지 않음)",
-      r_no_compare["condition"]["new_product_rate_pct"] is None
-      and r_no_compare["condition"]["net_effect_pct_p"] is None)
-
-r_compare_better = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
-                                                        "exception_condition_met": False,
-                                                        "new_product_rate_pct": 5.0}).get_json()
-_lost = r_compare_better["condition"]["lost_pct_p"]
-check("새 상품 비교: 새 상품 금리(5.0%) - 상실폭(lost_pct_p) = net_effect_pct_p (단순 뺄셈, 새 계산식 아님)",
-      _lost is not None
-      and r_compare_better["condition"]["net_effect_pct_p"] == round(5.0 - _lost, 4))
-check("새 상품 비교: 새 상품 금리가 상실폭보다 크면(순효과 > 0) 이득 방향으로 계산됨",
-      r_compare_better["condition"]["net_effect_pct_p"] > 0)
-
-r_compare_bad_input = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
-                                                           "exception_condition_met": False,
-                                                           "new_product_rate_pct": "not_a_number"}).get_json()
-check("새 상품 비교: 숫자로 변환 안 되는 값이 오면 크래시 대신 비교를 생략함(null)",
-      r_compare_bad_input["condition"]["new_product_rate_pct"] is None
-      and r_compare_bad_input["condition"]["net_effect_pct_p"] is None)
-
-check("새 상품 비교: engine/decide 판정 로직은 그대로 — 비교 입력이 있어도 decision/reason은 안 바뀜",
-      r_compare_better["decision"] == r_no_compare["decision"]
-      and r_compare_better["reason"] == r_no_compare["reason"])
-
-# ---------------------------------------------------------------------------
-# 2026-09-05 (동학 요청 2차): "퍼센트 계산할 땐 판정 로직은 없냐" — net_effect_pct_p의
-# 부호만으로 ADVANTAGEOUS/DISADVANTAGEOUS/EQUAL 3갈래 판정을 매긴다. 이 판정은
-# decision(PASS/HOLD)과는 완전히 다른 축이므로 위 테스트가 이미 decision 불변을
-# 검증했고, 여기서는 verdict 필드 자체의 3갈래 정확성만 확인한다.
-# ---------------------------------------------------------------------------
-check("경제적 효과 판정: 새 상품 금리가 상실폭보다 크면 ADVANTAGEOUS",
-      r_compare_better["condition"]["net_effect_verdict"] == "ADVANTAGEOUS")
-
-r_compare_worse = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
-                                                       "exception_condition_met": False,
-                                                       "new_product_rate_pct": 0.01}).get_json()
-check("경제적 효과 판정: 새 상품 금리가 상실폭보다 작으면 DISADVANTAGEOUS",
-      r_compare_worse["condition"]["net_effect_verdict"] == "DISADVANTAGEOUS")
-
-_lost_for_equal = r_no_compare["condition"]["lost_pct_p"]
-r_compare_equal = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
-                                                       "exception_condition_met": False,
-                                                       "new_product_rate_pct": _lost_for_equal}).get_json()
-check("경제적 효과 판정: 새 상품 금리가 상실폭과 정확히 같으면 EQUAL",
-      _lost_for_equal is not None and r_compare_equal["condition"]["net_effect_verdict"] == "EQUAL")
-
-check("경제적 효과 판정: 비교 입력이 없으면 net_effect_verdict도 null(값 지어내지 않음)",
-      r_no_compare["condition"]["net_effect_verdict"] is None)
+check("BLOCKER 3: new_product_rate_pct/net_effect_pct_p/net_effect_verdict 필드가 응답에서 완전히 사라짐",
+      "new_product_rate_pct" not in r_no_compare["condition"]
+      and "net_effect_pct_p" not in r_no_compare["condition"]
+      and "net_effect_verdict" not in r_no_compare["condition"])
+check("BLOCKER 3: 대신 고정 disclosure 문구(net_effect_note)가 항상 표시됨",
+      "MVP 자동계산 범위가 아닙니다" in r_no_compare["condition"]["net_effect_note"])
 
 # ---------------------------------------------------------------------------
 # 2026-09-05 (동학 요청 3차): "상품 종류에 따라 안 나오는 항목은 아예 안 보이게" —

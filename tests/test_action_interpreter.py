@@ -101,9 +101,13 @@ both = _store.match("PRODUCT_TERMINATION", institution="주택금융공사", pro
 check("institution+product 둘 다 줘도 정확히 좁혀짐 (HF_SUBSCRIPTION_DIDIMDOL 하나만)",
       [r["rule_id"] for r in both] == ["HF_SUBSCRIPTION_DIDIMDOL"])
 
+# 2026-09-05 (V5 Surgical, BLOCKER 1 / F01): 예전엔 존재하지 않는 product를 줘도
+# "전체 후보로 안전하게 fallback"해서 0건이 아니었다 — 하지만 이건 사용자가 말한
+# 적 없는 상품에 대해 confident하게 규칙을 매칭시키는 위험한 동작이었다(독립감사
+# F01). 이제는 정직하게 0건을 반환해서 호출부(app.py)가 REVIEW로 처리하게 한다.
 fake_product = _store.match("CARD_SPEND_SHIFT", product="존재하지않는상품명")
-check("존재하지 않는 product를 줘도 0건이 아니라 전체 후보로 안전하게 fallback",
-      len(fake_product) > 0)
+check("존재하지 않는 product를 주면 fallback 없이 정직하게 0건 반환",
+      len(fake_product) == 0)
 
 # ---------------------------------------------------------------------------
 # 2026-09-05 (FINAL_HARDENING Red-Team, P0-4): 실제 라이브(OpenAI)에서 "적금 하나
