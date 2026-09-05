@@ -109,7 +109,7 @@
 
   <div class="card">
     <label>1. 하려는 행동을 문장으로 입력하세요</label>
-    <textarea id="actionText" rows="2" placeholder="예: 다음 달부터 카드사용 5만원을 다른 카드로 옮길 거야"></textarea>
+    <textarea id="actionText" rows="2" maxlength="300" placeholder="예: 다음 달부터 카드사용 5만원을 다른 카드로 옮길 거야"></textarea>
     <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
       <button id="interpretBtn">해석하기</button>
       <button id="exampleBtn" type="button" class="secondary">예시 시나리오 실행</button>
@@ -241,6 +241,16 @@ document.getElementById('exampleBtn').onclick = () => {
   updateExampleCounter();
 };
 
+// 2026-09-05 (독립감사 F27): clarifying_question은 AI가 생성한 자유 문자열이라
+// innerHTML에 그대로 꽂으면, AI 응답이 손상되거나 악의적으로 조작된 경우
+// <script>/onerror= 같은 태그가 그대로 실행될 수 있다(XSS). 이 값만 escape해서
+// 순수 텍스트로만 삽입한다 — 판정 로직/문구 자체는 안 바꿨다.
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 document.getElementById('interpretBtn').onclick = async () => {
   const text = document.getElementById('actionText').value;
   const box = document.getElementById('interpretResult');
@@ -251,7 +261,7 @@ document.getElementById('interpretBtn').onclick = async () => {
     const d = data.delta;
     // 내부 예외 메시지(d.reason)는 화면에 노출하지 않는다 — action_type이나
     // clarifying_question처럼 사람이 읽을 수 있게 준비된 문구만 보여준다.
-    const shown = d.action_type || d.clarifying_question || (d.status === 'UNSUPPORTED' ? '지원하지 않는 행동 유형입니다.' : '');
+    const shown = escapeHtml(d.action_type || d.clarifying_question || (d.status === 'UNSUPPORTED' ? '지원하지 않는 행동 유형입니다.' : ''));
     const foundBits = [d.institution, d.product].filter(Boolean).join(' · ');
     const dbBit = d.direct_benefit_monthly ? ' · 직접이득 ' + d.direct_benefit_monthly.toLocaleString() + '원 인식됨' : '';
     box.innerHTML = `<div class="interpret-box ${d.status}"><b>${d.status}</b> — ${shown}${d.amount_monthly ? ' · ' + d.amount_monthly.toLocaleString() + '원' : ''}${foundBits ? ' · [' + foundBits + '] 인식됨' : ''}${dbBit}</div>`;

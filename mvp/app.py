@@ -78,16 +78,45 @@ def health():
     }), (200 if ok else 503)
 
 
+MAX_INTERPRET_TEXT_LEN = 500  # 독립감사 F27: 서버단 방어(클라이언트 maxlength는 우회 가능)
+
+
 @app.route("/api/interpret", methods=["POST"])
 def api_interpret():
     body = request.get_json(force=True, silent=True) or {}
     text = body.get("text", "")
+    if not isinstance(text, str):
+        text = ""
+    if len(text) > MAX_INTERPRET_TEXT_LEN:
+        text = text[:MAX_INTERPRET_TEXT_LEN]
     delta, meta = interpret(text)
+    # 2026-09-05 (독립감사 F27): action_interpreter.interpret()의 주석은 "원문 예외
+    # 메시지는 서버 쪽 meta['error']에만 남겨서 로그/디버깅에 쓴다"고 말하지만, 실제로는
+    # 이 meta 딕셔너리가 그대로 jsonify되어 브라우저 네트워크 탭에 노출되고 있었다 —
+    # 코드 주석의 의도와 실제 동작이 어긋난 정보 노출 결함. 서버 로그에는 남기고
+    # (print), 클라이언트로는 일반화된 문구만 내려준다. AI/판정 로직은 안 바꿨다.
+    if meta.get("error"):
+        print(f"[api_interpret] AI 호출 실패(서버 로그 전용): {meta['error']}")
+        meta = {k: v for k, v in meta.items() if k != "error"}
     return jsonify({"delta": delta.to_dict(), "meta": meta})
 
 
 def _rule_to_thresholds(rule: dict):
     return [{"min": t["min_won"], "effect_pct_p": t["effect_pct_p"]} for t in rule.get("tiers", [])]
+
+
+def _safe_float(value):
+    """2026-09-05 (독립감사 F23): amount_monthly="50000"처럼 문자열/이상한 타입이
+    들어오면 `amount <= 0` 비교에서 TypeError가 나서 500으로 죽었다(fail-closed
+    원칙 위반 — REVIEW 대신 서버 에러). 숫자로 못 바꾸면 None을 돌려주고, 호출부가
+    None을 "값 없음"과 동일하게 취급해 REVIEW로 안전 종료하게 한다. 판정 로직/
+    임계값은 전혀 안 바꿨다 — 타입 방어만 추가."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 @app.route("/api/evaluate", methods=["POST"])
@@ -122,7 +151,7 @@ def api_evaluate():
             return jsonify({"decision": "REVIEW",
                              "reason": "매칭된 규칙에 구간 정보가 없어 자동 계산할 수 없습니다.",
                              "matched_rules": [r["rule_id"] for r in matched]})
-        amount = body.get("amount_monthly")
+        amount = _safe_float(body.get("amount_monthly"))
         if amount is None or amount <= 0:
             result = decide(freshness_ok=freshness_ok, inputs_sufficient=False, rule_matched=True)
             return jsonify({**result, "matched_rules": [r["rule_id"] for r in qualifying_rules]})
@@ -137,10 +166,15 @@ def api_evaluate():
         # 실어 보낸다 — 그 경우에만 실제 값을 쓰고, 그렇지 않으면 여전히 1억원을
         # 가정하되 linked_balance_assumed=True로 명시해서 화면이 "가정값"이라고
         # 보여줄 수 있게 한다(값을 만들어내되 숨기지 않는다는 원칙).
-        linked_balance_provided = body.get("linked_balance")
+        # F23: 음수/문자열처럼 말이 안 되는 linked_balance가 들어오면(예: 실수로
+        # -1000000) 그대로 계산에 흘려보내지 않고 "안 준 것과 동일"하게 취급해
+        # 안전한 가정값으로 대체한다 — 크래시 대신 fail-closed.
+        linked_balance_provided = _safe_float(body.get("linked_balance"))
+        if linked_balance_provided is not None and linked_balance_provided < 0:
+            linked_balance_provided = None
         linked_balance_assumed = linked_balance_provided is None
         linked_balance = linked_balance_provided if linked_balance_provided is not None else 100_000_000
-        direct_benefit = body.get("direct_benefit_monthly", 0)
+        direct_benefit = _safe_float(body.get("direct_benefit_monthly", 0)) or 0
 
         by_id = {r["rule_id"]: r for r in qualifying_rules}
         rules_for_engine = [{"rule_id": r["rule_id"], "thresholds": _rule_to_thresholds(r)} for r in qualifying_rules]
@@ -233,6 +267,48 @@ def api_evaluate():
 
     # PRODUCT_TERMINATION / PAYMENT_ACCOUNT_CHANGE / SALARY_ACCOUNT_CHANGE — 이산 판정
     rule = matched[0]
+
+    # 2026-09-05 (독립감사 F16 — 인과관계 재검증): HANA_HISTORY_SAVINGS의 원장 metric은
+    # "가입 전일 기준 6개월간 하나은행 상품 미보유 이력"이다 — 가입 시점에 이미 확정된
+    # 과거 사실이라, 가입 이후 지금 이 상품을 해지하는 행동으로는 그 이력 자체가 절대
+    # 바뀌지 않는다(미래 행동이 과거 사실을 못 바꾼다는 단순한 인과 원칙). 기존 코드는
+    # 이 규칙도 다른 이산 규칙과 똑같이 action_removes_condition=True로 처리해서 해지만
+    # 하면 무조건 HOLD를 내는 잘못된 판정을 하고 있었다 — 이건 값을 새로 지어내는 게
+    # 아니라 오히려 근거 없는 HOLD(false HOLD)를 없애는 수정이다. 다른 7개 규칙에는
+    # 영향 없음(이 규칙만 가입 전 확정 이력이라는 특수 구조라 별도 처리가 맞다).
+    if rule["rule_id"] == "HANA_HISTORY_SAVINGS":
+        reason = ("이 우대조건은 가입 전일 기준 6개월간의 보유 이력으로, 가입 시점에 이미 "
+                  "확정됐습니다. 지금 이 상품을 해지해도 그 과거 이력 자체는 바뀌지 않으므로 "
+                  "이 조건은 이 행동으로 훼손될 수 없습니다(인과관계상 영향 없음).")
+        return jsonify({
+            "decision": "PASS", "reason": reason,
+            "matched_rules": [rule["rule_id"]],
+            "action": {"type": action_type, "amount": None, "unit": None},
+            "effects": {"D": None, "L": None, "G": None, "reversal": False,
+                        "reversal_reason": "D/G를 계산하지 않는 이산 조건이며, 이 조건은 애초에 이 행동으로 훼손될 수 없습니다."},
+            "condition": {
+                "baseline_effect_pct_p": rule.get("effect_pct_p"),
+                "lost_pct_p": None,
+                "exception_applied": False,
+                "new_product_rate_pct": None, "net_effect_pct_p": None, "net_effect_verdict": None,
+                "net_effect_note": None,
+                "causal_note": "가입 전 이력 조건 — 현재 행동으로는 훼손 불가(2026-09-05 독립감사 반영)",
+            },
+            "safety": {
+                "nominal_safe_limit": None, "robust_safe_limit": None, "robust_status": "NOT_APPLICABLE",
+                "robust_safe_zone": {"min": None, "max": None},
+                "warning_zone": {"min_exclusive": None, "max_inclusive": None}, "warning_status": "NOT_APPLICABLE",
+                "current_zone": "NOT_APPLICABLE", "binding_constraints": [rule["rule_id"]],
+                "financial_cliff": None, "cliff_status": "NOT_APPLICABLE",
+                "optimal_safe_range": None, "optimal_status": "NOT_APPLICABLE",
+            },
+            "time": {"TTB": None, "TTR": None, "unit": None},
+            "evidence": [{"rule_id": rule["rule_id"], "source_url": rule["source_url"], "verified_at": rule["verified_at"]}],
+            "engine_meta": {"engine_version": ENGINE_VERSION, "rule_ledger_hash": RULE_LEDGER_HASH},
+            "dlg": None,
+            "action_reversal": False,
+        })
+
     exception_met = bool(body.get("exception_condition_met", False))
     discrete = evaluate_discrete_rule(
         rule_effect_pct_p=rule.get("effect_pct_p") or (rule.get("tiers", [{}])[0].get("effect_pct_p") if rule.get("tiers") else None),
