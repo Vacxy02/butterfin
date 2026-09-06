@@ -44,14 +44,14 @@ class RuleStore:
         특정할 수 없다(예: 한 은행이 여러 상품을 취급하거나, 같은 상품을 여러 은행이
         취급할 수 있음). 둘 다 주면 두 조건을 순서대로 다 적용해서 더 좁힌다.
 
-        2026-09-05 (V5 Surgical, BLOCKER 1 / F01): 예전엔 좁힌 결과가 0건이면(사용자가
-        말한 이름이 실제 등록된 값과 안 맞을 때) 그 단계를 무시하고 이전(더 넓은)
-        후보군으로 조용히 돌아갔다 — 그 결과 "존재하지 않는 상품"을 지정해도 엉뚱한
-        규칙이 confident하게 매칭되는 위험한 fallback이었다(독립감사 F01, 2026-09-05).
-        이제는 사용자가 institution/product를 명시했는데 그 값이 실제 등록된 어느
-        규칙과도 안 맞으면 정직하게 0건을 반환한다 — 호출부(app.py)가 이를 "행동과
-        연결된 규칙을 찾지 못했다"는 REVIEW로 안전하게 처리한다. institution/product를
-        아예 안 준 경우는 원래부터 그 축을 좁히지 않으므로 영향 없다."""
+        2026-09-05 (V7 FIX 1, strict/fail-closed matching): 예전엔 institution/
+        product로 좁힌 결과가 0건이면 그 필터를 무시하고 더 넓은 후보군으로 조용히
+        되돌아갔다 — 그 결과 사용자가 존재하지 않는(또는 오타난) 기관/상품명을
+        지정해도 엉뚱한 규칙이 매칭돼 confident한 PASS/HOLD를 낼 수 있는 위험한
+        fallback이었다. 이제는 사용자가 institution/product를 명시했는데 그 값이
+        실제 등록된 어느 규칙과도 안 맞으면 정직하게 0건을 반환한다 — 호출부
+        (app.py)가 이를 REVIEW로 안전하게 처리한다. institution/product를 아예
+        안 준 경우는 원래부터 그 축을 좁히지 않으므로 영향 없다."""
         candidates = [r for r in self.rules if action_type in r.get("action_types", [])]
         if institution:
             candidates = [r for r in candidates if institution in r.get("institution", "")]

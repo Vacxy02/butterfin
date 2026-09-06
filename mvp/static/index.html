@@ -86,6 +86,29 @@
   #resultCard { box-shadow:var(--shadow-md); }
   #resultCard #decisionBadge { margin-bottom:2px; }
 
+  /* 2026-09-06 (심사위원용 결과화면 UX 개선): '한눈에 보는 결과' 요약 카드.
+     engine/판정 로직은 그대로이고, 이미 계산된 값(decision/reason/effects/safety/
+     condition)을 사람이 3~5초 안에 읽을 수 있는 문장으로 재배치만 한다. */
+  .summary-card { border-radius:14px; padding:16px 18px; margin-bottom:16px; border:1.5px solid var(--line); }
+  .summary-card.HOLD, .summary-card.EXECUTION_BLOCKED { background:var(--crit-sf); border-color:var(--crit); }
+  .summary-card.PASS { background:var(--good-sf); border-color:var(--good); }
+  .summary-card.REVIEW { background:var(--warn-sf); border-color:var(--warn); }
+  .summary-head { display:flex; align-items:center; gap:9px; font-size:16px; font-weight:800;
+    letter-spacing:-0.01em; margin-bottom:7px; text-wrap:balance; }
+  .summary-icon { font-size:20px; line-height:1; flex:none; }
+  .summary-body { font-size:13.5px; color:var(--ink); line-height:1.6; margin:0 0 4px; }
+  .summary-card .stat-grid { margin-top:11px; }
+  .summary-card .stat { background:rgba(255,255,255,0.6); }
+
+  /* 상세 보기(규칙 코드/전체 계산 항목) 접기 — 기본 화면은 위 요약 카드만으로
+     충분히 읽히게 하고, rule_id 같은 내부값은 여기 펼쳐야만 보이게 한다. */
+  #detailToggle { margin-top:16px; border-top:1px solid var(--line); padding-top:4px; }
+  #detailToggle > summary { cursor:pointer; font-size:12.5px; font-weight:700; color:var(--accent-ink);
+    padding:9px 2px; list-style:none; user-select:none; }
+  #detailToggle > summary::-webkit-details-marker { display:none; }
+  #detailToggle > summary::before { content:'▸ 상세 보기 (규칙 코드 · 전체 계산 항목)'; }
+  #detailToggle[open] > summary::before { content:'▾ 상세 보기 접기'; }
+
   /* 2026-09-04: 다크모드 자동 전환을 껐다 — 시스템 설정과 무관하게 항상 흰 배경으로
      고정한다(요청: "다시 흰배경으로 바꾸자"). 위 :root 라이트 팔레트가 유일한 팔레트다. */
 </style>
@@ -147,10 +170,14 @@
   </div>
 
   <div class="card" id="resultCard" style="display:none;">
+    <div id="summaryCard"></div>
     <div id="decisionBadge"></div>
     <div class="reason" id="reasonText"></div>
-    <div id="statGrid"></div>
-    <div class="evidence" id="evidenceText"></div>
+    <details id="detailToggle">
+      <summary></summary>
+      <div id="statGrid"></div>
+      <div class="evidence" id="evidenceText"></div>
+    </details>
   </div>
 </div>
 
@@ -328,16 +355,19 @@ function fmtRange(min, max) {
 // 채택했다 — robust_safe_limit은 이미 nominal과 같은 값으로 계산돼 있으므로(엔진이
 // 임의 버퍼를 만들지 않음), 화면 문구도 "계산 안 함"이라고 하지 않는다. 숫자 범위와
 // "계산 안 함"을 동시에 보여주던 예전 모순 표현을 여기서 없앤다.
+// 2026-09-06 (심사위원용 결과화면 UX 개선): "Robust"/"Nominal" 같은 영어 전문
+// 용어를 기본 화면 문구에서 없앴다 — 계산 로직/값은 그대로이고 문구만 순화했다.
+// 괄호 안에 원래 전문용어를 남겨서, 필요한 사람은 여전히 찾을 수 있게 했다.
 const ROBUST_STATUS_LABEL = {
-  CALCULATED: '계산됨 (확인된 불확실성 범위 기준)',
-  NOT_APPLICABLE: '불확실성 정보 없음 → Nominal Safe Zone과 동일 (임의 버퍼를 만들지 않음)',
-  EMPTY_SAFE_ZONE: '안전구간 없음 — 최악의 경우 즉시 위반 가능',
+  CALCULATED: '확인된 불확실성 범위를 반영해 계산됨',
+  NOT_APPLICABLE: '추가로 반영할 불확실성 정보가 없어 안전 한도와 같은 범위를 사용함 (임의로 여유를 만들지 않음)',
+  EMPTY_SAFE_ZONE: '안전하게 실행 가능한 범위 없음 — 최악의 경우 즉시 영향 가능',
 };
 // FIX-2: robust와 nominal이 같으면 Warning Zone은 공집합이다. "20,000원 ~ 20,000원"처럼
-// 폭이 0인 숫자 구간으로 보여주지 않고 이 라벨로 대체한다.
+// 폭이 0인 숫자 구간으로 보여주면 구간이 아니라 오류처럼 보이므로 이 라벨로 대체한다.
 const WARNING_STATUS_LABEL = {
   CALCULATED: null,  // 실제 구간이 있을 때는 라벨 대신 숫자 범위를 그대로 보여준다.
-  NONE: '해당 없음 — Robust Safe Zone과 Nominal Safe Limit이 같아 경고구간이 존재하지 않습니다.',
+  NONE: '해당 없음 — 안전하게 실행 가능한 범위와 안전 한도가 같아서 별도의 위험 구간이 없습니다.',
   NOT_APPLICABLE: '계산에 필요한 정보 부족',
 };
 const CLIFF_STATUS_LABEL = {
@@ -345,6 +375,122 @@ const CLIFF_STATUS_LABEL = {
   NOT_APPLICABLE: '해당 없음 (실제 불연속 지점 없음)',
   UNKNOWN: '계산에 필요한 정보 부족 (연계 잔액 등 미입력)',
 };
+
+// 2026-09-06 (심사위원용 결과화면 UX 개선): 내부 코드명(action_type/rule_id)을
+// 기본 화면에 그대로 노출하지 않기 위한 사람이 읽는 이름 매핑. 판정 로직/값에는
+// 전혀 관여하지 않는 순수 표시용 상수다 — 여기 없는 값은 원래 코드값을 그대로
+// 보여준다(값을 지어내지 않는다는 원칙 유지, 매핑 누락이 화면을 깨지 않게).
+const ACTION_TYPE_LABEL = {
+  CARD_SPEND_SHIFT: '카드 사용금액 이동',
+  PRODUCT_TERMINATION: '상품 해지',
+  PAYMENT_ACCOUNT_CHANGE: '결제계좌 변경',
+  SALARY_ACCOUNT_CHANGE: '급여계좌 변경',
+};
+function actionTypeLabel(t) { return ACTION_TYPE_LABEL[t] || t || '이 행동'; }
+
+const RULE_LABEL = {
+  KB_CARD_LOAN_STEP: 'KB 대출 우대조건',
+  KB_SAVINGS_LOAN_HOLD: 'KB 대출 연계 우대조건',
+  HF_SUBSCRIPTION_DIDIMDOL: '디딤돌대출 청약통장 연계 우대조건',
+  KBANK_TELECOM_SAVINGS: '케이뱅크 자유적금 우대조건',
+  SHINHYUP_SALARY: '신협 급여이체 우대조건',
+  SHINHYUP_CARD_ACCOUNT: '신협 결제계좌 우대조건',
+  SHINHYUP_CARD_USAGE: '신협 카드실적 우대조건',
+  HANA_HISTORY_SAVINGS: '하나은행 적금 가입이력 조건',
+};
+function ruleLabel(id) { return RULE_LABEL[id] || id; }
+// 요약 카드용 — rule_id 자체는 노출하지 않고 사람이 읽는 이름만 이어 붙인다.
+function ruleLabelsText(ids) {
+  if (!Array.isArray(ids) || !ids.length) return '관련';
+  return ids.map(ruleLabel).join(', ');
+}
+// 상세 보기용 — 사람이 읽는 이름과 원래 코드값(rule_id)을 같이 보여준다.
+function ruleLabelWithCode(id) {
+  const label = RULE_LABEL[id];
+  return label ? `${label} (${id})` : id;
+}
+
+// 2026-09-06: '한눈에 보는 결과' 요약 카드. 여기서 새로 계산하는 값은 하나도
+// 없다 — /api/evaluate가 이미 계산해 돌려준 decision/reason/effects/safety/
+// condition 값을 사람이 3~5초 안에 읽을 수 있는 문장으로 재배치할 뿐이다.
+function buildSummaryCard(data, isDiscreteType, safety, effects, condition, time) {
+  const decision = data.decision || 'REVIEW';
+  const actionRaw = data.action && data.action.type;
+  const aLabel = actionTypeLabel(actionRaw);
+  const rLabel = ruleLabelsText(data.matched_rules);
+
+  let icon = '🔍', headline = '지금 정보로는 안전 여부를 확정할 수 없습니다.';
+  const bodyLines = [];
+  let statsHtml = '';
+
+  if (!isDiscreteType) {
+    // CARD_SPEND_SHIFT — 연속 금액 모델. 계획 금액과 안전 한도를 직접 비교해 보여준다.
+    const amount = data.action && data.action.amount !== null && data.action.amount !== undefined ? data.action.amount : null;
+    const limit = safety.nominal_safe_limit !== null && safety.nominal_safe_limit !== undefined ? safety.nominal_safe_limit : null;
+    if (decision === 'HOLD') {
+      icon = '⚠️'; headline = '이 계획은 그대로 실행하지 않는 것이 좋습니다.';
+      bodyLines.push(`월 ${fmtWonPlain(amount)}을 다른 카드로 옮기면 보유 중인 ${rLabel}에 영향을 줍니다.`);
+      const stats = [];
+      if (limit !== null) stats.push(statCard('안전한 이동금액', `월 ${fmtWonPlain(limit)} 이하`));
+      if (amount !== null && limit !== null) {
+        stats.push(statCard('현재 계획', `${fmtWonPlain(amount)} → 안전한도보다 ${fmtWonPlain(amount - limit)} 초과`));
+      }
+      if (effects.G && effects.G.value !== null && effects.G.value !== undefined) {
+        const ttr = time.TTR;
+        stats.push(statCard('예상 전체효과', `${(ttr !== null && ttr !== undefined) ? ttr + '개월 뒤 ' : ''}${fmtWon(effects.G.value)}`));
+      }
+      if (stats.length) statsHtml = `<div class="stat-grid">${stats.join('')}</div>`;
+    } else if (decision === 'PASS') {
+      icon = '✅'; headline = '이 계획은 그대로 실행해도 안전합니다.';
+      bodyLines.push(`월 ${fmtWonPlain(amount)}은 현재 유지 중인 ${rLabel}의 안전 한도 이내입니다.`);
+      const stats = [];
+      if (limit !== null) stats.push(statCard('안전 한도', `월 ${fmtWonPlain(limit)} 이하`));
+      if (amount !== null && limit !== null) stats.push(statCard('한도까지 여유', fmtWonPlain(limit - amount)));
+      if (stats.length) statsHtml = `<div class="stat-grid">${stats.join('')}</div>`;
+    } else {
+      icon = '🔍'; headline = '지금 정보로는 안전 여부를 확정할 수 없습니다.';
+      bodyLines.push(data.reason || '추가 확인이 필요합니다.');
+    }
+  } else {
+    // 이산형(해지/계좌변경) — %p 우대폭 상실 여부로 서술한다.
+    if (decision === 'HOLD') {
+      icon = '⚠️'; headline = '이 계획은 그대로 실행하지 않는 것이 좋습니다.';
+      const lost = condition.lost_pct_p;
+      bodyLines.push(`${aLabel}을(를) 실행하면 ${rLabel}이 사라집니다${(lost !== null && lost !== undefined) ? ` (${lost}%p 상실)` : ''}.`);
+    } else if (decision === 'PASS') {
+      icon = '✅'; headline = '이 계획은 그대로 실행해도 우대조건에 영향이 없습니다.';
+      bodyLines.push(condition.causal_note ? condition.causal_note
+        : (condition.exception_applied ? `예외 조항이 적용되어 ${rLabel}이 유지됩니다.`
+          : `${aLabel}을(를) 실행해도 ${rLabel}은 유지됩니다.`));
+    } else {
+      icon = '🔍'; headline = '지금 정보로는 안전 여부를 확정할 수 없습니다.';
+      bodyLines.push(data.reason || '추가 확인이 필요합니다.');
+    }
+  }
+
+  return `<div class="summary-card ${decision}">
+    <div class="summary-head"><span class="summary-icon">${icon}</span><span>${headline}</span></div>
+    ${bodyLines.map(l => `<div class="summary-body">${l}</div>`).join('')}
+    ${statsHtml}
+  </div>`;
+}
+
+// 규칙 자체가 특정 안 돼(effects 자체가 없는 REVIEW) 위 buildSummaryCard가 쓸 수
+// 있는 재료가 없을 때를 위한 최소 요약 — 이때도 rule_id는 사람이 읽는 이름으로
+// 바꿔서 보여준다.
+function buildMinimalSummaryCard(data) {
+  const decision = data.decision || 'REVIEW';
+  const candNames = Array.isArray(data.candidates) && data.candidates.length
+    ? data.candidates.map(c => ruleLabel(c.rule_id)).join(', ')
+    : (data.matched_rules && data.matched_rules.length ? ruleLabelsText(data.matched_rules) : null);
+  const body = candNames
+    ? `계획하신 행동이 [${candNames}] 중 어느 계약에 영향을 주는지 특정되지 않았습니다. 은행/상품을 정확히 지정하면 확정 판정을 받을 수 있습니다.`
+    : (data.reason || '추가 확인이 필요합니다.');
+  return `<div class="summary-card ${decision}">
+    <div class="summary-head"><span class="summary-icon">🔍</span><span>지금 정보로는 안전 여부를 확정할 수 없습니다.</span></div>
+    <div class="summary-body">${body}</div>
+  </div>`;
+}
 
 document.getElementById('evaluateBtn').onclick = async () => {
   const action_type = document.getElementById('actionType').value;
@@ -373,6 +519,10 @@ document.getElementById('evaluateBtn').onclick = async () => {
     // fail-closed: 서버/네트워크 문제로 판정을 못 받으면 자동으로 PASS인 척하지
     // 않는다 — REVIEW로 표시하고 사람 확인을 안내한다.
     document.getElementById('resultCard').style.display = 'block';
+    document.getElementById('summaryCard').innerHTML = `<div class="summary-card REVIEW">
+      <div class="summary-head"><span class="summary-icon">🔍</span><span>지금 정보로는 안전 여부를 확정할 수 없습니다.</span></div>
+      <div class="summary-body">서버에서 판정 결과를 받지 못했습니다. 잠시 후 다시 시도하거나 담당자에게 확인해 주세요.</div>
+    </div>`;
     document.getElementById('decisionBadge').innerHTML = `<span class="badge REVIEW">REVIEW</span>`;
     document.getElementById('reasonText').textContent = '서버에서 판정 결과를 받지 못했습니다. 잠시 후 다시 시도하거나 담당자에게 확인해 주세요.';
     document.getElementById('statGrid').innerHTML = '';
@@ -393,6 +543,38 @@ document.getElementById('evaluateBtn').onclick = async () => {
   const condition = data.condition || {};
   const isDiscreteType = safety.current_zone === 'NOT_APPLICABLE' && (data.action ? data.action.amount === null : true);
 
+  // 2026-09-05 (V7 FIX 1 후속): 규칙 자체가 안 매칭됐거나(REVIEW: 규칙 없음/구간정보
+  // 없음/금액 없음) 여러 규칙이 동시에 매칭돼(REVIEW: 다중 후보, FIX 1) 아직 확정
+  // 계산을 하지 않은 응답은 data.effects가 아예 없다 — 이 경우 D/L/G, Safe Zone 등
+  // 상세 섹션을 만들 재료 자체가 없으므로 억지로 렌더링하지 않고(존재하지 않는 값을
+  // 지어내지 않는다는 원칙 그대로) 사유/후보 목록만 보여준다.
+  if (!data.effects) {
+    document.getElementById('summaryCard').innerHTML = buildMinimalSummaryCard(data);
+    let minimalHtml = '';
+    if (Array.isArray(data.candidates) && data.candidates.length) {
+      minimalHtml += `<div class="subhead">영향받을 수 있는 보유계약 후보</div><div class="stat-grid">`;
+      data.candidates.forEach(c => {
+        // 기본 화면(위 요약 카드)은 사람이 읽는 이름만 보여주고, 여기 상세 보기에서만
+        // rule_id 원본 코드를 사람이 읽는 이름과 함께 보여준다.
+        minimalHtml += statCard(ruleLabelWithCode(c.rule_id) || '?', [c.institution, c.product].filter(Boolean).join(' · ') || '확인 필요');
+      });
+      minimalHtml += `</div>`;
+      minimalHtml += `<div class="note">위 은행/상품 입력란에 정확한 기관·상품명을 넣고 다시 판정해주세요.</div>`;
+    }
+    if (data.matched_rules && data.matched_rules.length) {
+      minimalHtml += `<div class="note">매칭 규칙: ${data.matched_rules.map(ruleLabelWithCode).join(', ')}</div>`;
+    }
+    if (data.scope_note) {
+      minimalHtml += `<div class="note" style="opacity:0.8;">${data.scope_note}</div>`;
+    }
+    document.getElementById('statGrid').innerHTML = minimalHtml;
+    document.getElementById('evidenceText').innerHTML = '';
+    document.getElementById('detailToggle').open = false;
+    return;
+  }
+
+  document.getElementById('summaryCard').innerHTML = buildSummaryCard(data, isDiscreteType, safety, effects, condition, time);
+
   let html = '';
 
   // 2. 현재 계획 행동량 — 2026-09-05(동학 요청): "상품 종류에 따라 안 나오는 항목은
@@ -400,7 +582,9 @@ document.getElementById('evaluateBtn').onclick = async () => {
   // 존재하지 않는 개념이므로, "해당 없음" 문구로 자리만 차지하게 두지 않고 항목 자체를
   // 렌더링하지 않는다. (판정에 쓰는 값은 그대로, 화면 표시만 바뀐 것)
   html += `<div class="subhead">2. 현재 계획 행동량</div><div class="stat-grid">`;
-  html += statCard('행동 유형', (data.action && data.action.type) || '확인 필요');
+  html += statCard('행동 유형', (data.action && data.action.type)
+    ? `${actionTypeLabel(data.action.type)} (${data.action.type})`
+    : '확인 필요');
   if (!isDiscreteType) {
     html += statCard('계획 금액', (data.action && data.action.amount !== null && data.action.amount !== undefined)
       ? data.action.amount.toLocaleString() + '원/월'
@@ -430,7 +614,7 @@ document.getElementById('evaluateBtn').onclick = async () => {
     // 새 계산이나 가짜 금액 환산을 만들어내지 않는다(원 단위 Safe Zone은 이 유형에
     // 애초에 없다는 원칙 그대로 유지).
     html += `<div class="subhead">3. ${dLabel.noun} — 조건 유지 현황</div><div class="stat-grid">`;
-    html += statCard('현재 유지 중인 우대폭', condition.baseline_effect_pct_p !== null && condition.baseline_effect_pct_p !== undefined
+    html += statCard('이 등록 규칙상 우대폭', condition.baseline_effect_pct_p !== null && condition.baseline_effect_pct_p !== undefined
       ? condition.baseline_effect_pct_p + '%p' : '확인 필요');
     let impactText;
     if (condition.exception_applied) {
@@ -443,57 +627,75 @@ document.getElementById('evaluateBtn').onclick = async () => {
     html += statCard(`${dLabel.noun} 시 영향`, impactText);
     html += `</div>`;
 
+    // 2026-09-05 (V7 FIX 3): 디딤돌대출처럼 가입기간/납입회차 없이는 어느 구간
+    // (tier)인지 특정할 수 없는 경우, 예전엔 tiers[0]을 임의로 골라 확정 %p를
+    // 냈다 — 이제는 REVIEW로 남기고 그 이유와 사용자가 다음에 뭘 하면 되는지를
+    // condition.review_note로 설명한다. 값을 지어내지 않고 이유를 보여준다.
+    if (condition.review_note) {
+      html += `<div class="note">${condition.review_note}</div>`;
+    }
+
     // 2026-09-05(동학 요청): 원금이 같다고 가정하고, 새로 가입하려는 상품의 금리를
     // 사용자가 직접 입력하면 "우대 상실폭 vs 새 상품 금리"를 단순 비교해 보여준다.
     // engine.py/판정 로직은 그대로이고, app.py가 사용자가 준 숫자로 뺄셈만 한
     // 부가 정보다. 입력 안 하면(condition.new_product_rate_pct === null) 이 블록
     // 자체를 표시하지 않는다 — 값을 지어내지 않는다.
+    // 2026-09-05 (V7 FIX 5): 두 값(등록 규칙의 %p 우대폭 vs 사용자가 입력한 새 상품
+    // 금리 %)은 서로 다른 금융계약의 서로 다른 지표라서 단순 차감/비교로 "유리·불리"를
+    // 매길 수 없다 — 예전엔 이걸 net_effect_pct_p/net_effect_verdict로 계산해
+    // ADVANTAGEOUS/DISADVANTAGEOUS 배지까지 보여줬는데, 이는 존재하지 않는 정밀도를
+    // 지어낸 것이었다(원금·잔여기간·중도해지조건 등을 전혀 모른 채 계산). 입력창은
+    // 그대로 유지하되(퍼센트 입력창 유지, 절대 지시), 입력값을 그대로 에코만 하고
+    // 서버가 함께 내려주는 new_product_rate_note로 "왜 자동 비교하지 않는지"를 명시한다.
     if (condition.new_product_rate_pct !== null && condition.new_product_rate_pct !== undefined) {
       html += `<div class="subhead">3-1. 새 상품과 비교 (참고용)</div><div class="stat-grid">`;
       html += statCard('새로 가입하려는 상품 금리', condition.new_product_rate_pct + '%');
-      // 2026-09-05(동학): "퍼센트 비교할 때 판정 로직은 없냐" — 부호(net_effect_pct_p)만
-      // 보고 텍스트로 풀어쓰던 것을 서버가 계산한 net_effect_verdict 배지로 명시한다.
-      // 이 배지는 위반 여부(PASS/HOLD)와는 완전히 다른 축이다 — "경제적으로 유리하다"가
-      // "위반이 아니다"를 의미하지 않는다. 아래에 조건 위반 배지를 별도로 계속 보여준다.
-      const NET_VERDICT_LABEL = {
-        ADVANTAGEOUS: '유리 (새 상품이 이득)',
-        DISADVANTAGEOUS: '불리 (기존 상품 유지가 이득)',
-        EQUAL: '동일 (차이 없음)',
-      };
-      if (condition.net_effect_pct_p !== null && condition.net_effect_pct_p !== undefined) {
-        const net = condition.net_effect_pct_p;
-        const sign = net > 0 ? '+' : '';
-        html += statCard('순 효과', `${sign}${net}%p`);
-        html += statCard('경제적 효과 판정', `<span class="badge ${condition.net_effect_verdict}">${NET_VERDICT_LABEL[condition.net_effect_verdict] || condition.net_effect_verdict}</span>`);
-      } else {
-        html += statCard('순 효과', '비교 불가 (기존 우대폭을 확인할 수 없음)');
-      }
+      html += statCard('자동 손익 비교', '제공하지 않음 (아래 참고 참조)');
       html += `</div>`;
-      html += `<div class="note">${condition.net_effect_note || '원금이 동일하다고 가정한 단순 %p 비교(참고용)입니다.'} 이 판정은 "행동이 조건을 위반하는지"와는 별개입니다 — 위반 여부는 위 "${dLabel.noun} 시 영향"과 아래 "현재 행동 위치"를 기준으로 확인하세요.</div>`;
+      html += `<div class="note">${condition.new_product_rate_note || '두 값은 서로 다른 금융계약의 지표이므로 단순 차감하지 않습니다.'} 위반 여부는 위 "${dLabel.noun} 시 영향"과 아래 "현재 행동 위치"를 기준으로 확인하세요.</div>`;
     }
   }
 
   if (!isDiscreteType) {
-    // 3. Robust Safe Zone
-    html += `<div class="subhead">3. Robust Safe Zone</div><div class="stat-grid">`;
+    // 3. 안전하게 실행 가능한 범위 (전문용어: Robust Safe Zone) — 기본 화면 문구에서는
+    // 영어 전문용어를 빼고, 상세 노트에만 원래 용어를 괄호로 남긴다. 계산값 자체는
+    // safety.robust_safe_zone을 그대로 옮겨 적을 뿐, 새로 계산하지 않는다.
+    html += `<div class="subhead">3. 안전하게 실행 가능한 범위</div><div class="stat-grid">`;
     html += statCard('범위', fmtRange(safety.robust_safe_zone ? safety.robust_safe_zone.min : null, safety.robust_safe_zone ? safety.robust_safe_zone.max : null));
     html += statCard('상태', ROBUST_STATUS_LABEL[safety.robust_status] || safety.robust_status || '확인 필요');
     html += `</div>`;
+    html += `<div class="note">(전문용어: Robust Safe Zone)</div>`;
     if (safety.robust_status === 'NOT_APPLICABLE') {
-      html += `<div class="note">위 범위는 Robust 기준으로 새로 계산된 값이 아니라, Nominal Safe Zone과 동일한 값을 그대로 보여준 것입니다.</div>`;
+      html += `<div class="note">위 범위는 별도로 새로 계산된 값이 아니라, 아래 "5. 안전 한도"와 동일한 값을 그대로 보여준 것입니다.</div>`;
     }
 
-    // 4. Warning Zone — FIX-2: robust==nominal(공집합)이면 숫자 구간 대신 "해당 없음"만 보여준다.
-    html += `<div class="subhead">4. Warning Zone</div><div class="stat-grid">`;
+    // 4. 위험 구간 (전문용어: Warning Zone) — FIX-2: robust==nominal(공집합)이면
+    // 숫자 구간 대신 "해당 없음"을 보여준다. 이번 수정(경계가 한 점인 경우 방어):
+    // 상태가 CALCULATED라도 min_exclusive === max_inclusive(경계값이 하나뿐인
+    // 구간)이면 "20,000원 ~ 20,000원"처럼 구간처럼 안 보이고 오류처럼 보이는 표현
+    // 대신 "경계값" 문구로 바꾼다 — 값 자체는 그대로, 표현만 바꾼 것이다.
+    html += `<div class="subhead">4. 위험 구간</div><div class="stat-grid">`;
     const wz = safety.warning_zone || {};
     const warningLabel = WARNING_STATUS_LABEL[safety.warning_status];
-    html += statCard('범위 (초과 ~ 이하)', warningLabel || fmtRange(wz.min_exclusive, wz.max_inclusive));
+    let warningDisplay;
+    if (warningLabel) {
+      warningDisplay = warningLabel;
+    } else if (wz.min_exclusive !== null && wz.min_exclusive !== undefined
+      && wz.max_inclusive !== null && wz.max_inclusive !== undefined
+      && wz.min_exclusive === wz.max_inclusive) {
+      warningDisplay = `경계값: 월 ${fmtWonPlain(wz.max_inclusive)} — 이 금액을 초과하면 위험합니다.`;
+    } else {
+      warningDisplay = fmtRange(wz.min_exclusive, wz.max_inclusive);
+    }
+    html += statCard('범위 (초과 ~ 이하)', warningDisplay);
     html += `</div>`;
+    html += `<div class="note">(전문용어: Warning Zone)</div>`;
 
-    // 5. Nominal Safe Limit
-    html += `<div class="subhead">5. Nominal Safe Limit</div><div class="stat-grid">`;
+    // 5. 안전 한도 (전문용어: Nominal Safe Limit)
+    html += `<div class="subhead">5. 안전 한도</div><div class="stat-grid">`;
     html += statCard('한도', safety.nominal_safe_limit !== null && safety.nominal_safe_limit !== undefined ? fmtWonPlain(safety.nominal_safe_limit) + '/월' : '확인 필요');
     html += `</div>`;
+    html += `<div class="note">(전문용어: Nominal Safe Limit)</div>`;
   }
 
   // 6. 현재 행동 위치 — 2026-09-05: 이산 판정 3유형은 safety.current_zone이 app.py에서
@@ -516,7 +718,8 @@ document.getElementById('evaluateBtn').onclick = async () => {
 
   // 7. Binding Constraint
   html += `<div class="subhead">7. Binding Constraint</div><div class="stat-grid">`;
-  html += statCard('가장 엄격한 계약(동률 포함)', (safety.binding_constraints && safety.binding_constraints.length) ? safety.binding_constraints.join(', ') : '확인 필요');
+  html += statCard('가장 엄격한 계약(동률 포함)', (safety.binding_constraints && safety.binding_constraints.length)
+    ? safety.binding_constraints.map(ruleLabelWithCode).join(', ') : '확인 필요');
   html += `</div>`;
 
   // 8. Financial Cliff — FIX-3: 항상 horizon_months(12개월) 누적 기준. 아래 9번(D/L/G)의
@@ -558,6 +761,15 @@ document.getElementById('evaluateBtn').onclick = async () => {
     html += `<div class="note">위 연쇄효과(L)·전체효과(G)·Financial Cliff는 문장에서 인식한 실제 연계 계약 잔액 ${lb.value.toLocaleString()}원 기준으로 계산됐습니다.</div>`;
   }
 
+  // 2026-09-05 (V7 FIX 6): D/L/G 계산에 쓰인 최근 3개월 카드실적(hist3)·향후 월
+  // 사용액(baseline_monthly) 가정도 linked_balance와 같은 원칙으로 밝힌다 — 사용자가
+  // 입력하지 않아 대표 시나리오 기본값을 썼다면 실제 값처럼 보이지 않도록 명시한다.
+  const hist3Info = effects.hist3;
+  const baselineInfo = effects.baseline_monthly;
+  if (hist3Info && baselineInfo && (hist3Info.assumed || baselineInfo.assumed)) {
+    html += `<div class="note">${effects.scenario_note || '대표 시나리오 가정을 사용했습니다.'} (최근 3개월 카드실적: ${hist3Info.value.map(v => v.toLocaleString()).join('원, ')}원, 향후 월 사용액: ${baselineInfo.value.toLocaleString()}원 — 문장에 실제 실적을 포함하면 그 값으로 계산합니다.)</div>`;
+  }
+
   // 10. Action Reversal — FIX-4: 상단 판정 사유(위 reasonText, TTR 기준 "누적 전체효과
   // 음수 전환" 문구)와 이 섹션의 "Action Reversal 정의(D>0, G<0) 충족 여부"는 서로 다른
   // 질문이다. 둘을 같은 자리에 섞어 보여주면 모순처럼 읽힐 수 있어 완전히 분리한다.
@@ -596,7 +808,12 @@ document.getElementById('evaluateBtn').onclick = async () => {
   }
 
   if (data.matched_rules) {
-    html += `<div class="note">매칭 규칙: ${data.matched_rules.join(', ') || '없음'}</div>`;
+    html += `<div class="note">매칭 규칙: ${data.matched_rules.length ? data.matched_rules.map(ruleLabelWithCode).join(', ') : '없음'}</div>`;
+  }
+  // 2026-09-05 (V7 FIX 7): 모든 판정에 공통으로 붙는 범위 고지 — "이 판정이 무엇을
+  // 기준으로 내려졌는지"를 매 결과 화면 맨 아래에 한 번 명시한다.
+  if (data.scope_note) {
+    html += `<div class="note" style="opacity:0.8;">${data.scope_note}</div>`;
   }
 
   document.getElementById('statGrid').innerHTML = html;
@@ -611,7 +828,7 @@ document.getElementById('evaluateBtn').onclick = async () => {
       const link = safeUrl
         ? `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer">${safeUrl}</a>`
         : (url || '확인 필요');
-      return `<div>· [${e.rule_id || '?'}] ${link} (검증일 ${e.verified_at || '?'})</div>`;
+      return `<div>· [${ruleLabelWithCode(e.rule_id) || '?'}] ${link} (검증일 ${e.verified_at || '?'})</div>`;
     }).join('');
   } else {
     ev.innerHTML = '';

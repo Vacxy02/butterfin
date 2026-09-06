@@ -201,28 +201,35 @@ record("15. D/L/G 전부 known일 때 G=D+L 항등식 성립 (t=4)",
 
 # ============================================================================
 # 16. D unknown(이산 판정 유형) → G/Reversal 과잉 계산 금지 — app.py 실제 응답으로 검증
+#
+# 2026-09-05 (V7 FIX 4): Action Reversal은 D>0,G<0을 실제로 "계산"해서 판정하는
+# 개념이다(CARD_SPEND_SHIFT만 D/G를 계산). 이산형은 D/G 자체가 없으므로
+# effects.reversal이 discrete.violation을 대신 실어 나르지 않는다 — 위반 여부와
+# 무관하게 항상 False다. 대신 decision(HOLD/PASS)과 condition.lost_pct_p/
+# exception_applied가 실제 위반 여부를 담당한다. 후보가 1개로 좁혀지도록
+# institution/product를 함께 주고(FIX 1), 실제 exception 필드가 있는 규칙
+# (KBANK_TELECOM_SAVINGS)으로 위반/면제 두 경로를 검증한다(FIX 2: exception
+# 필드 없는 규칙은 체크값으로 면제되지 않으므로).
 # ============================================================================
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "mvp"))
 from app import app as flask_app
 _client = flask_app.test_client()
-# 2026-09-05 (V5 Surgical, BLOCKER 1/2): PRODUCT_TERMINATION만 주면 이제 후보가
-# 3개라 REVIEW로 fail-closed하므로, 단일 후보로 좁히는 institution/product를 함께
-# 준다. 또한 KB_SAVINGS_LOAN_HOLD는 rule.exception이 실제로 없는 규칙이라(BLOCKER 2)
-# exception_condition_met=True를 줘도 더 이상 면제되지 않는다 — 대신 실제
-# rule.exception이 있는 KBANK_TELECOM_SAVINGS(PAYMENT_ACCOUNT_CHANGE)를 써서
-# "면제 있음(exempt)/면제 없음(violate)" 두 경로를 그대로 검증한다.
 r16_violate = _client.post('/api/evaluate', json={"action_type": "PAYMENT_ACCOUNT_CHANGE",
                                                     "institution": "케이뱅크", "product": "주거래우대 자유적금",
                                                     "exception_condition_met": False}).get_json()
 r16_exempt = _client.post('/api/evaluate', json={"action_type": "PAYMENT_ACCOUNT_CHANGE",
                                                    "institution": "케이뱅크", "product": "주거래우대 자유적금",
                                                    "exception_condition_met": True}).get_json()
-record("16. D unknown(이산 판정) → effects.D/L/G는 None으로 정직하게 남고, reversal은 D/G로 계산하지 않고 이산판정 그대로 사용",
+record("16. D unknown(이산 판정) → effects.D는 None, effects.reversal은 위반여부와 무관하게 항상 False(FIX 4) — 위반여부는 decision/condition으로 표현",
        {"action_type": "PAYMENT_ACCOUNT_CHANGE", "exception_condition_met": [False, True]},
-       {"violation_case": {"D": None, "reversal": True}, "exempt_case": {"D": None, "reversal": False}},
-       {"violation_case": r16_violate["effects"], "exempt_case": r16_exempt["effects"]},
-       r16_violate["effects"]["D"] is None and r16_violate["effects"]["reversal"] is True
-       and r16_exempt["effects"]["D"] is None and r16_exempt["effects"]["reversal"] is False)
+       {"violation_case": {"D": None, "reversal": False, "decision": "HOLD"},
+        "exempt_case": {"D": None, "reversal": False, "decision": "PASS"}},
+       {"violation_case": {**r16_violate["effects"], "decision": r16_violate["decision"]},
+        "exempt_case": {**r16_exempt["effects"], "decision": r16_exempt["decision"]}},
+       r16_violate["effects"]["D"] is None and r16_violate["effects"]["reversal"] is False
+       and r16_violate["decision"] == "HOLD"
+       and r16_exempt["effects"]["D"] is None and r16_exempt["effects"]["reversal"] is False
+       and r16_exempt["decision"] == "PASS")
 
 # ============================================================================
 # 17. Optimal Safe Range 존재

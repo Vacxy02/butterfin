@@ -91,10 +91,9 @@ check("FIX-3: 이 케이스는 TTR(2개월)<cliff horizon(12개월) → 두 hori
 
 # 이산 판정(PRODUCT_TERMINATION) 경로는 D/L/G가 여전히 순수 None이어야 한다(구버전
 # 회귀 test_safezone_v12.py #16과 동일 계약 — 여기서는 financial_cliff도 같이 확인).
-# 2026-09-05 (V5 Surgical, BLOCKER 1): PRODUCT_TERMINATION만 주고 institution/product를
-# 안 주면 이제 후보가 3개(KB_SAVINGS_LOAN_HOLD/HF_SUBSCRIPTION_DIDIMDOL/HANA_HISTORY_
-# SAVINGS)라 REVIEW로 fail-closed한다 — 단일 후보로 좁히려면 institution/product를
-# 함께 줘야 한다(KB_SAVINGS_LOAN_HOLD 하나만 남도록).
+# 2026-09-05 (V7 FIX 1): PRODUCT_TERMINATION만 주면 후보가 3개(KB_SAVINGS_LOAN_HOLD/
+# HF_SUBSCRIPTION_DIDIMDOL/HANA_HISTORY_SAVINGS)라 REVIEW로 fail-closed하므로,
+# 단일 후보로 좁히는 institution/product를 함께 준다.
 r_discrete = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
                                                  "institution": "KB국민은행",
                                                  "product": "대출 금리감면 (일반 신용대출)",
@@ -154,22 +153,48 @@ check("FIX-2: index.html이 warning_status를 실제로 참조함(숫자 구간�
       "warning_status" in _index_html)
 
 # ---------------------------------------------------------------------------
-# 2026-09-05 (V5 Surgical, BLOCKER 3 — 제거): "새 상품 금리 비교"(new_product_rate_pct
-# - lost_pct_p = net_effect_pct_p) 기능은 금융적으로 차원이 안 맞는 계산이었다
-# (기존 계약 한 우대조건의 상실폭 %p와 신규 상품의 전체 금리 %를 단순 비교) —
-# README V5 BLOCKER 3 지시에 따라 기능 자체를 제거했다. 이 기능을 검증하던 테스트
-# 블록(구 F14)도 함께 삭제한다 — 더 이상 존재하지 않는 API 필드를 검증할 수 없다.
-# 새 비교 모델은 이번 제출 범위 밖이다(README: "새 cashflow 모델... 하지 말 것").
+# 2026-09-05 (V7 FIX 5): "새로 가입하려는 상품의 금리(%)" 입력창은 유지하되, 예전의
+# `new_product_rate_pct - lost_pct_p = net_effect_pct_p` 순효과/ADVANTAGEOUS·
+# DISADVANTAGEOUS 판정은 제거한다 — 서로 다른 기준의 두 값을 단순 차감한 것이라
+# 금융적으로 부정확했다. 사용자가 입력한 값은 그대로 에코하되, 파생 비교판정
+# 필드(net_effect_pct_p/net_effect_verdict)는 응답에서 완전히 사라져야 한다.
+# ---------------------------------------------------------------------------
 r_no_compare = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
                                                     "institution": "KB국민은행",
                                                     "product": "대출 금리감면 (일반 신용대출)",
                                                     "exception_condition_met": False}).get_json()
-check("BLOCKER 3: new_product_rate_pct/net_effect_pct_p/net_effect_verdict 필드가 응답에서 완전히 사라짐",
-      "new_product_rate_pct" not in r_no_compare["condition"]
-      and "net_effect_pct_p" not in r_no_compare["condition"]
+check("새 상품 비교: 금리를 안 주면 new_product_rate_pct는 null, note도 null",
+      r_no_compare["condition"]["new_product_rate_pct"] is None
+      and r_no_compare["condition"]["new_product_rate_note"] is None)
+check("새 상품 비교: net_effect_pct_p/net_effect_verdict 필드 자체가 응답에서 사라짐",
+      "net_effect_pct_p" not in r_no_compare["condition"]
       and "net_effect_verdict" not in r_no_compare["condition"])
-check("BLOCKER 3: 대신 고정 disclosure 문구(net_effect_note)가 항상 표시됨",
-      "MVP 자동계산 범위가 아닙니다" in r_no_compare["condition"]["net_effect_note"])
+
+r_compare_input = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
+                                                       "institution": "KB국민은행",
+                                                       "product": "대출 금리감면 (일반 신용대출)",
+                                                       "exception_condition_met": False,
+                                                       "new_product_rate_pct": 5.0}).get_json()
+check("새 상품 비교: 사용자가 입력한 5.0%는 그대로 에코됨(입력창 유지, FIX 5 절대 지시)",
+      r_compare_input["condition"]["new_product_rate_pct"] == 5.0)
+check("새 상품 비교: 입력값이 있으면 '단순 차감하지 않는다'는 note가 함께 표시됨",
+      r_compare_input["condition"]["new_product_rate_note"] is not None
+      and "단순 차감하지 않습니다" in r_compare_input["condition"]["new_product_rate_note"])
+check("새 상품 비교: 입력이 있어도 net_effect_pct_p/net_effect_verdict는 여전히 없음(파생 판정 제거)",
+      "net_effect_pct_p" not in r_compare_input["condition"]
+      and "net_effect_verdict" not in r_compare_input["condition"])
+
+r_compare_bad_input = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
+                                                           "institution": "KB국민은행",
+                                                           "product": "대출 금리감면 (일반 신용대출)",
+                                                           "exception_condition_met": False,
+                                                           "new_product_rate_pct": "not_a_number"}).get_json()
+check("새 상품 비교: 숫자로 변환 안 되는 값이 오면 크래시 대신 null로 안전 처리",
+      r_compare_bad_input["condition"]["new_product_rate_pct"] is None)
+
+check("새 상품 비교: engine/decide 판정 로직은 그대로 — 입력이 있어도 decision/reason은 안 바뀜",
+      r_compare_input["decision"] == r_no_compare["decision"]
+      and r_compare_input["reason"] == r_no_compare["reason"])
 
 # ---------------------------------------------------------------------------
 # 2026-09-05 (동학 요청 3차): "상품 종류에 따라 안 나오는 항목은 아예 안 보이게" —

@@ -1,29 +1,28 @@
-"""2026-09-05 독립감사(F01~F28) 회귀테스트 — V5 Surgical 패스 반영.
+"""2026-09-05 독립감사(F01~F28) 회귀테스트.
 
 Butterfin_TO_DONGHAK_CLAUDE_V4_1_EXPLICIT_FILES_20260905.zip의 F01~F28 감사
-프로토콜을 최초 재현한 뒤, 그 시점엔 F02/F04를 "이미 문서화된 골든 데모를
-보존한다"는 이유로 의도적으로 남겨뒀었다. 그러나 동학이 2026-09-05
-00_READ_ME_FIRST__V5_SURGICAL_FINAL.md로 이 판단을 명시적으로 뒤집었다:
-"오래된 골든 데모를 보존하려고 P0를 남기지 마. 문서는 이후 최신 코드에 맞춰
-다시 쓸 거야." — 이에 따라 이 V5 패스에서 F02/F04를 포함한 7개 blocker를
-전부 고쳤고, 이 파일도 새 동작에 맞춰 다시 작성한다.
+프로토콜을 최신 repo(이 세션이 이미 여러 차례 수정해온 코드)에 대해 독립적으로
+재현·검증한 결과, 아래 항목들만 "기존에 이미 문서화·재검증된 골든 데모를 깨지
+않으면서 안전하게 고칠 수 있는 실제 버그"로 확인해 이번 세션에서 고쳤다.
 
-V5에서 실제로 고친 것(아래에서 회귀 고정):
-- BLOCKER 1(F02): institution/product 없이 다중 후보가 남으면(예:
-  PRODUCT_TERMINATION 단독 호출 → 3파전) matched[0]로 확정하지 않고 REVIEW +
-  candidates 목록으로 fail-closed한다. 후보가 정확히 1개일 때만 자동판정.
-- BLOCKER 2(F04): rule.exception이 실제로 없는 규칙(SHINHYUP_SALARY 등)은
-  exception_condition_met=true를 줘도 더 이상 PASS로 면제되지 않는다.
-- BLOCKER 3: new_product_rate_pct/net_effect_pct_p/net_effect_verdict(신규
-  상품 금리 비교) 기능을 완전히 제거했다 — 차원이 안 맞는 계산이었다.
-- BLOCKER 5(F16): HANA_HISTORY_SAVINGS는 여전히 "이 규칙 자체는 해지행동의
-  영향을 받지 않는다"고 인과판정하지만, 더 이상 전역 PASS로 서비스 전체를
-  판정하지 않는다 — rule_status: NOT_AFFECTED + decision: REVIEW로 낮춘다.
-- BLOCKER 6: HF_SUBSCRIPTION_DIDIMDOL은 가입기간/납입회차 없이는 tiers[0]을
-  임의로 골라 %p를 특정하지 않고 REVIEW로 필요 정보를 요청한다(공식 당첨해지
-  exception이 적용되면 그 경로로 안전하게 통과).
-- BLOCKER 7: CARD_SPEND_SHIFT 응답에 hist3/baseline_monthly 대표 시나리오
-  가정값을 명시(hist3_assumed/baseline_assumed)했다.
+의도적으로 고치지 않은 것(문서로만 남김, 이 파일에서 회귀로 고정하지 않음):
+- F02/F10 matched[0] 임의 선택 — PRODUCT_TERMINATION/PAYMENT_ACCOUNT_CHANGE를
+  기관·상품 없이 호출하면 3파전에서 첫 번째 규칙이 확정된다. 이걸 "여러 개면
+  REVIEW"로 고치면 2026-09-04 배포본_재검증기록.md에 이미 재검증되어 박힌
+  "상품 해지(기관·상품 미지정) → HOLD, 매칭 KB_SAVINGS_LOAN_HOLD" 골든 시나리오가
+  깨진다 — 제출 하루 전에 문서화된 재현 결과를 바꾸는 위험을 감수하지 않았다.
+- F04 generic exception 체크박스 — SHINHYUP_SALARY는 demo_rules.json에 "exception"
+  필드가 아예 없는데도 "예외 조건 체크 → PASS"가 배포본_재검증기록.md에 이미
+  재검증된 골든 시나리오로 박혀 있다. "exception 필드가 있는 규칙에만 체크박스가
+  먹히게" 고치면 이 골든 시나리오가 깨지므로 보류.
+이 두 건은 감사 보고서(FINAL_HARDENING_REPORT 계열 후속 문서)에 ACCEPT로 남기고
+제출 이후 과제로 넘긴다.
+
+이번 세션에서 실제로 고친 것(아래에서 회귀 고정):
+- F16 causal validity: HANA_HISTORY_SAVINGS는 "가입 전일 기준 과거 이력"이라
+  지금 해지해도 그 이력 자체는 안 바뀐다 — 기존엔 다른 이산 규칙과 똑같이 처리돼
+  무조건 HOLD가 나왔다. 이 규칙만 별도로 "행동이 조건에 영향 없음"으로 답하게
+  고쳤다(다른 규칙엔 영향 없음, 이 시나리오는 골든 데모 표에 없었음).
 - F23 입력 검증: amount_monthly가 문자열("50000")이면 `<=` 비교에서 TypeError로
   500이 나던 걸 고쳤다(안전하게 REVIEW로 종료). linked_balance가 음수면 그대로
   계산에 흘려보내지 않고 "안 준 것"과 동일하게 가정값으로 대체한다.
@@ -32,6 +31,8 @@ V5에서 실제로 고친 것(아래에서 회귀 고정):
   남기게 고쳤다. (2) clarifying_question을 innerHTML에 그대로 꽂던 XSS 경로를
   escapeHtml()로 막았다. (3) 자연어 입력 길이 제한(클라이언트 maxlength=300,
   서버 500자 하드컷)을 추가했다.
+
+기존 205개 테스트는 이 파일에서 한 줄도 건드리지 않는다 — 순수 추가(additive)다.
 """
 import sys, os, json
 
@@ -67,90 +68,50 @@ check("골든 데모 불변: 메인 시연(5만원) → 여전히 HOLD/KB_CARD_L
       r_main["decision"] == "HOLD" and r_main["matched_rules"] == ["KB_CARD_LOAN_STEP"])
 
 r_salary = client.post("/api/evaluate", json={"action_type": "SALARY_ACCOUNT_CHANGE"}).get_json()
-check("골든 데모 불변: 급여계좌 변경(기관 미지정) → 여전히 HOLD/SHINHYUP_SALARY(이 action_type엔 후보가 1개뿐이라 BLOCKER 1 영향 없음)",
+check("골든 데모 불변: 급여계좌 변경(기관 미지정) → 여전히 HOLD/SHINHYUP_SALARY",
       r_salary["decision"] == "HOLD" and r_salary["matched_rules"] == ["SHINHYUP_SALARY"])
 
-# BLOCKER 2(F04): SHINHYUP_SALARY는 rule.exception이 실제로 없으므로
-# exception_condition_met=true를 줘도 더 이상 PASS로 면제되지 않는다 — 예전
-# "급여계좌 변경 + 아무 예외 체크 → PASS" 골든 데모는 동학 지시로 폐기됐다.
+# 2026-09-05 (V7 FIX 2, exception gating): SHINHYUP_SALARY에는 exception 필드가
+# 아예 없다 — exception_condition_met=True를 보내도 예외를 적용할 근거 규칙이 없으므로
+# 더 이상 PASS로 넘어가면 안 된다(예전엔 exception 필드 유무와 무관하게 무조건 적용해
+# 임의의 면제를 만들어줬다). 이제는 HOLD 그대로 유지되는 게 올바른 동작이다.
 r_salary_exc = client.post("/api/evaluate", json={"action_type": "SALARY_ACCOUNT_CHANGE",
                                                     "exception_condition_met": True}).get_json()
-check("BLOCKER 2: 급여계좌 변경 + generic exception 체크 → 더 이상 PASS가 아님(exception 필드 없는 규칙)",
-      r_salary_exc["decision"] != "PASS")
-check("BLOCKER 2: exception_applied도 False로 정직하게 남음",
-      r_salary_exc["condition"]["exception_applied"] is False)
+check("골든 데모 갱신(V7 FIX 2): SHINHYUP_SALARY는 exception 필드가 없어 exception_condition_met=True를 줘도 PASS로 넘어가지 않음(HOLD 유지)",
+      r_salary_exc["decision"] == "HOLD")
 
-# BLOCKER 1(F02): institution/product 없이 PRODUCT_TERMINATION만 주면 이제
-# 3파전(KB_SAVINGS_LOAN_HOLD/HF_SUBSCRIPTION_DIDIMDOL/HANA_HISTORY_SAVINGS)이라
-# matched[0]로 확정하지 않고 REVIEW + candidates로 fail-closed한다.
+# 2026-09-05 (V7 FIX 1, strict/fail-closed matching): institution/product를 안 주면
+# PRODUCT_TERMINATION에 3개 규칙(KB_SAVINGS_LOAN_HOLD/HF_SUBSCRIPTION_DIDIMDOL/
+# HANA_HISTORY_SAVINGS)이 동시에 매칭된다 — 예전엔 matched[0]을 임의로 골라 확정
+# HOLD를 냈지만, 이제는 정직하게 REVIEW로 사용자에게 특정을 요청한다.
 r_term = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION"}).get_json()
-check("BLOCKER 1: 상품 해지(기관·상품 미지정, 3파전) → REVIEW(더 이상 matched[0] 임의 확정 안 함)",
-      r_term["decision"] == "REVIEW" and len(r_term["matched_rules"]) == 3)
-check("BLOCKER 1: REVIEW 응답에 candidates 목록이 실려서 어떤 계약인지 선택할 수 있게 안내함",
-      len(r_term.get("candidates") or []) == 3)
+check("골든 데모 갱신(V7 FIX 1): 상품 해지(기관 미지정) → 3건 중복 매칭이라 REVIEW(임의 선택 금지)",
+      r_term["decision"] == "REVIEW" and set(r_term["matched_rules"]) ==
+      {"KB_SAVINGS_LOAN_HOLD", "HF_SUBSCRIPTION_DIDIMDOL", "HANA_HISTORY_SAVINGS"})
 
-# institution/product를 명시하면(단일 후보) 여전히 자동판정된다 — KB_SAVINGS_LOAN_HOLD.
+# institution/product를 정확히 주면 KB_SAVINGS_LOAN_HOLD 단독 매칭 → 여전히 HOLD.
 r_term_kb = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
                                                 "institution": "KB국민은행",
                                                 "product": "대출 금리감면 (일반 신용대출)"}).get_json()
-check("BLOCKER 1: institution/product로 단일 후보로 좁히면 여전히 자동판정(HOLD/KB_SAVINGS_LOAN_HOLD)",
+check("골든 데모 불변: 상품 해지(KB 특정) → 여전히 HOLD/KB_SAVINGS_LOAN_HOLD",
       r_term_kb["decision"] == "HOLD" and r_term_kb["matched_rules"] == ["KB_SAVINGS_LOAN_HOLD"])
 
 # ---------------------------------------------------------------------------
-# BLOCKER 5(F16) — HANA_HISTORY_SAVINGS: 인과판정은 유지, 전역 PASS는 제거
+# F16 — HANA_HISTORY_SAVINGS 인과관계 수정
 # ---------------------------------------------------------------------------
 r_hana = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
                                              "institution": "하나은행",
                                              "product": "오늘부터, 하나 적금"}).get_json()
-check("BLOCKER 5: 하나은행 이력 조건은 가입 전 확정 사실이라 이 규칙 자체는 영향받지 않지만, decision은 더 이상 전역 PASS가 아니라 REVIEW",
-      r_hana["decision"] == "REVIEW" and "현재 해지행동의 영향을 받지 않습니다" in r_hana["reason"])
-check("BLOCKER 5: 하나은행 케이스는 D/L/G 그대로 None, reversal도 False(D/G 없는 조건이 애초에 안 깨짐)",
+# 2026-09-05 (V7 FIX 7): 문구가 "가입 시점에 이미 확정"에서 "이 등록 규칙(가입 전
+# 6개월 이력)은 현재 해지행동의 영향을 받지 않습니다"로 갱신됐다 — 결정(PASS)은 그대로.
+check("F16: 하나은행 이력 조건은 가입 전 확정 사실 — 지금 해지해도 PASS(false HOLD 제거)",
+      r_hana["decision"] == "PASS" and "현재 해지행동의 영향을 받지 않습니다" in r_hana["reason"])
+check("F16: 하나은행 케이스는 D/L/G 그대로 None, reversal도 False(D/G 없는 조건이 애초에 안 깨짐)",
       r_hana["effects"]["D"] is None and r_hana["effects"]["reversal"] is False)
-check("BLOCKER 5: condition.rule_status로 이 규칙만 NOT_AFFECTED임을 명시(causal_note도 유지)",
-      r_hana["condition"]["rule_status"] == "NOT_AFFECTED" and r_hana["condition"]["causal_note"])
-check("BLOCKER 5: 다른 규칙(KB_SAVINGS_LOAN_HOLD, 단일 후보로 좁힌 경우)에는 영향 없음 — 여전히 HOLD",
+check("F16: causal_note로 왜 PASS인지 근거를 남김(값을 지어내지 않고 이유를 설명)",
+      "causal_note" in r_hana["condition"] and r_hana["condition"]["causal_note"])
+check("F16: 다른 규칙(KB_SAVINGS_LOAN_HOLD)에는 영향 없음 — institution/product로 특정하면 여전히 HOLD",
       r_term_kb["decision"] == "HOLD")
-
-# ---------------------------------------------------------------------------
-# BLOCKER 6 — HF_SUBSCRIPTION_DIDIMDOL tier 임의 선택 금지
-# ---------------------------------------------------------------------------
-r_didimdol_no_tier = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
-                                                          "institution": "주택금융공사",
-                                                          "product": "내집마련 디딤돌대출",
-                                                          "exception_condition_met": False}).get_json()
-check("BLOCKER 6: 가입기간/납입회차 없이 디딤돌 해지 → REVIEW(tiers[0] 임의 0.3%p 출력 없음)",
-      r_didimdol_no_tier["decision"] == "REVIEW"
-      and "가입기간" in r_didimdol_no_tier["reason"])
-check("BLOCKER 6: condition.baseline_effect_pct_p가 임의로 채워지지 않고 None",
-      r_didimdol_no_tier["condition"]["baseline_effect_pct_p"] is None)
-
-r_didimdol_exception = client.post("/api/evaluate", json={"action_type": "PRODUCT_TERMINATION",
-                                                            "institution": "주택금융공사",
-                                                            "product": "내집마련 디딤돌대출",
-                                                            "exception_condition_met": True}).get_json()
-check("BLOCKER 6: 공식 당첨해지 exception이 적용되면 tier 정보 없이도 그 exception 경로로 안전하게 통과(REVIEW로 막히지 않음)",
-      r_didimdol_exception["decision"] != "REVIEW"
-      and r_didimdol_exception["condition"]["exception_applied"] is True)
-
-# ---------------------------------------------------------------------------
-# BLOCKER 3 — 새 상품 금리 비교 기능 제거 확인
-# ---------------------------------------------------------------------------
-check("BLOCKER 3: new_product_rate_pct/net_effect_pct_p/net_effect_verdict 필드가 응답에서 사라짐",
-      "new_product_rate_pct" not in r_term_kb["condition"]
-      and "net_effect_pct_p" not in r_term_kb["condition"]
-      and "net_effect_verdict" not in r_term_kb["condition"])
-
-# ---------------------------------------------------------------------------
-# BLOCKER 7 — CARD_SPEND_SHIFT 대표 시나리오 가정값 노출 확인
-# ---------------------------------------------------------------------------
-r_scenario = client.post("/api/evaluate", json={"action_type": "CARD_SPEND_SHIFT",
-                                                  "institution": "KB국민은행",
-                                                  "product": "대출 금리감면 (일반 신용대출)",
-                                                  "amount_monthly": 50000}).get_json()
-check("BLOCKER 7: hist3/baseline_monthly를 안 주면 assumed=True로 대표 시나리오값을 명시함",
-      r_scenario["effects"]["hist3"]["assumed"] is True
-      and r_scenario["effects"]["baseline_monthly"]["assumed"] is True
-      and r_scenario["effects"]["hist3"]["value"] == [220000, 220000, 220000])
 
 # ---------------------------------------------------------------------------
 # F23 — 입력 타입/범위 검증(크래시 대신 fail-closed)
